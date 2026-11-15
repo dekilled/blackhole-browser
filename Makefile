@@ -4,35 +4,34 @@ PKGS     = openssl zlib freetype2 x11
 CSTD     = -std=gnu11 -D_GNU_SOURCE
 WARN     = -Wall -Wextra -Wshadow -Wformat=2 -Wno-unused-parameter
 HARDEN   = -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -fno-strict-overflow
-CFLAGS  ?= -O2 -g
-CFLAGS  += $(CSTD) $(WARN) $(HARDEN) $(shell pkg-config --cflags $(PKGS))
-LDFLAGS += -pie -Wl,-z,relro,-z,now
+OPT     ?= -O2 -g
+SAN     ?=
+CFLAGS   = $(OPT) $(SAN) $(CSTD) $(WARN) $(HARDEN) $(shell pkg-config --cflags $(PKGS))
+LDFLAGS  = -pie -Wl,-z,relro,-z,now $(SAN)
 LDLIBS   = $(shell pkg-config --libs $(PKGS)) -lm -lpthread
 
 SRC      = $(wildcard src/*.c)
-OBJ      = $(SRC:src/%.c=build/%.o)
-BIN      = build/blackhole
+BDIR    ?= build
+OBJ      = $(SRC:src/%.c=$(BDIR)/%.o)
+BIN      = $(BDIR)/blackhole
 
 all: $(BIN)
 
-build/%.o: src/%.c $(wildcard src/*.h) | build
+$(BDIR)/%.o: src/%.c $(wildcard src/*.h)
+	@mkdir -p $(BDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BIN): $(OBJ)
 	$(CC) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
-build:
-	mkdir -p build
-
-# Debug build with AddressSanitizer + UndefinedBehaviorSanitizer
+# Debug build with AddressSanitizer + UndefinedBehaviorSanitizer (separate directory)
 asan:
-	$(MAKE) clean
-	$(MAKE) CFLAGS="-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer" LDFLAGS="-fsanitize=address,undefined"
+	$(MAKE) BDIR=build-asan OPT="-O1 -g -fno-omit-frame-pointer" SAN="-fsanitize=address,undefined -fno-sanitize-recover=undefined"
 
-test: $(BIN)
+test: all
 	./tests/run.sh
 
 clean:
-	rm -rf build
+	rm -rf build build-asan
 
 .PHONY: all asan test clean

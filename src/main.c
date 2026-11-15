@@ -8,6 +8,7 @@
 #include "charset.h"
 #include "dom.h"
 #include "gfx.h"
+#include "img.h"
 #include "html.h"
 #include "layout.h"
 #include "net.h"
@@ -56,6 +57,33 @@ int main(int argc, char **argv) {
     signal(SIGPIPE, SIG_IGN);
     if (!setlocale(LC_CTYPE, "C.UTF-8")) setlocale(LC_CTYPE, "en_US.UTF-8");
 
+    if (argc == 4 && !strcmp(argv[1], "--decode-image")) { /* test helper: decode and write a PPM over white */
+        FILE *f = fopen(argv[2], "rb");
+        if (!f) return 1;
+        Buf raw;
+        buf_init(&raw);
+        char tmp[65536];
+        size_t k;
+        while ((k = fread(tmp, 1, sizeof tmp, f)) > 0) buf_append(&raw, tmp, k);
+        fclose(f);
+        Image im;
+        if (!image_decode((const uint8_t *)raw.data, raw.len, &im)) { fprintf(stderr, "decode falhou\n"); return 1; }
+        FILE *o = fopen(argv[3], "wb");
+        fprintf(o, "P6\n%d %d\n255\n", im.w, im.h);
+        for (int i = 0; i < im.w * im.h; i++) {
+            uint32_t p = im.px[i], a = p >> 24;
+            uint8_t rgb[3];
+            for (int c = 0; c < 3; c++) {
+                uint32_t v = (p >> (16 - 8 * c)) & 255;
+                rgb[c] = (uint8_t)((v * a + 255 * (255 - a) + 127) / 255);
+            }
+            fwrite(rgb, 1, 3, o);
+        }
+        fclose(o);
+        image_free(&im);
+        buf_free(&raw);
+        return 0;
+    }
     const char *shot = NULL, *url = NULL;
     int         W = 1024, H = 768;
     float       scroll = 0;

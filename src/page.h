@@ -29,6 +29,7 @@ typedef struct Page {
     PageImage   *images;
     int          nimages_fetched;
     bool         allow_file_subresources;
+    char        *base; /* base URL for relative references */
 } Page;
 
 /* Loads and parses a URL. Never returns NULL: on failure returns an error page. */

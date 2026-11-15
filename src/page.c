@@ -1,9 +1,11 @@
 #include "page.h"
 
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "charset.h"
+#include "img.h"
 #include "html.h"
 #include "style.h"
 #include "url.h"
@@ -13,6 +15,7 @@
 #define MAX_IMPORT_DEPTH 3
 
 static Image *resolve_image(void *user, const Node *img);
+static void   prefetch_images(Page *p);
 
 static void add_sheet(Page *p, Stylesheet *s) {
     if (p->nsheets >= MAX_SHEETS) {
@@ -114,6 +117,8 @@ static void collect_stylesheets(Page *p, Viewport vp) {
         if (!n || n == p->doc) break;
         n = n->next;
     }
+    free(p->base);
+    p->base = xstrdup(base);
     free(base_owned);
 }
 
@@ -140,6 +145,7 @@ static void finish_page(Page *p, const char *utf8, size_t len, Viewport vp) {
     p->nsheets = 0;
     add_sheet(p, style_ua_sheet()); /* index 0, never freed by page_free */
     collect_stylesheets(p, vp);
+    prefetch_images(p);
 }
 
 static Page *new_page(const char *url) {
@@ -230,10 +236,119 @@ Page *page_load(const char *url, bool user_initiated) {
 }
 
 /* ------------------------------------------------------------------- images - */
+#define MAX_IMAGES 80
+#define MAX_IMAGE_BYTES (10u * 1024 * 1024)
+#define IMAGE_WORKERS 6
+
+/* Picks the URL an <img> should load (src, lazy-loading attributes, srcset) or NULL. */
+static char *image_url_for(const Page *p, const Node *img) {
+    const char *src = dom_attr(img, "src");
+    bool placeholder = !src || !*src || !strncmp(src, "data:image/gif;base64,R0lGODlhAQABA", 35) || !strncmp(src, "about:", 6);
+    if (placeholder) {
+        static const char *lazy[] = {"data-src", "data-lazy-src", "data-original", "data-srcset", "srcset", NULL};
+        for (int i = 0; lazy[i]; i++) {
+            const char *v = dom_attr(img, lazy[i]);
+            if (v && *v) {
+                /* srcset syntax: "url 1x, url2 2x": take the first candidate */
+                char *copy = xstrdup(v);
+                char *t = str_trim(copy);
+                size_t n = strcspn(t, " \t,");
+                t[n] = 0;
+                char *abs = *t ? url_resolve(p->base ? p->base : p->url, t) : NULL;
+                free(copy);
+                if (abs) return abs;
+            }
+        }
+        if (!src || !*src) return NULL;
+    }
+    return url_resolve(p->base ? p->base : p->url, src);
+}
+
+typedef struct {
+    Page       *p;
+    char      **urls;
+    PageImage **out;
+    int         n, next;
+    pthread_mutex_t mu;
+} ImgJob;
+
+static void *image_worker(void *arg) {
+    ImgJob *j = arg;
+    for (;;) {
+        pthread_mutex_lock(&j->mu);
+        int i = j->next++;
+        pthread_mutex_unlock(&j->mu);
+        if (i >= j->n) break;
+        PageImage *pi = xcalloc(1, sizeof *pi);
+        pi->url = xstrdup(j->urls[i]);
+        pi->failed = true;
+        FetchOpts o = net_default_opts();
+        o.max_body = MAX_IMAGE_BYTES;
+        o.timeout_ms = 8000;
+        o.total_timeout_ms = 20000;
+        o.allow_file = j->p->allow_file_subresources;
+        Response r;
+        if (net_fetch(pi->url, &o, &r) && r.status >= 200 && r.status < 300) {
+            if (image_decode(r.body, r.body_len, &pi->img)) pi->failed = false;
+            else bh_log("image decode failed: %s (%s)", pi->url, r.content_type ? r.content_type : "?");
+        } else {
+            bh_log("image fetch failed: %s: %s", pi->url, r.error ? r.error : "HTTP error");
+        }
+        response_free(&r);
+        j->out[i] = pi;
+    }
+    return NULL;
+}
+
+static void prefetch_images(Page *p) {
+    char **urls = NULL;
+    int    n = 0;
+    bool   page_https = !strncmp(p->url, "https://", 8);
+    Node  *nd = p->doc->first_child;
+    while (nd && n < MAX_IMAGES) {
+        if (nd->type == NODE_ELEMENT && !strcmp(nd->tag, "img")) {
+            char *u = image_url_for(p, nd);
+            bool  ok = u && (!page_https || strncmp(u, "http://", 7) != 0); /* no mixed content */
+            if (ok) for (int i = 0; i < n; i++) if (!strcmp(urls[i], u)) { ok = false; break; }
+            if (ok) {
+                urls = xrealloc(urls, sizeof(char *) * (size_t)(n + 1));
+                urls[n++] = u;
+            } else free(u);
+        }
+        if (nd->first_child) { nd = nd->first_child; continue; }
+        while (nd && nd != p->doc && !nd->next) nd = nd->parent;
+        if (!nd || nd == p->doc) break;
+        nd = nd->next;
+    }
+    if (n == 0) { free(urls); return; }
+    ImgJob job = {p, urls, xcalloc((size_t)n, sizeof(PageImage *)), n, 0, PTHREAD_MUTEX_INITIALIZER};
+    pthread_t th[IMAGE_WORKERS];
+    int       nt = n < IMAGE_WORKERS ? n : IMAGE_WORKERS, started = 0;
+    pthread_attr_t at;
+    pthread_attr_init(&at);
+    pthread_attr_setstacksize(&at, 512 * 1024);
+    for (int i = 0; i < nt; i++)
+        if (pthread_create(&th[started], &at, image_worker, &job) == 0) started++;
+    pthread_attr_destroy(&at);
+    if (started == 0) image_worker(&job); /* could not spawn threads: do it inline */
+    for (int i = 0; i < started; i++) pthread_join(th[i], NULL);
+    for (int i = 0; i < n; i++) {
+        if (job.out[i]) { job.out[i]->next = p->images; p->images = job.out[i]; p->nimages_fetched++; }
+        free(urls[i]);
+    }
+    free(urls);
+    free(job.out);
+}
+
 static Image *resolve_image(void *user, const Node *img) {
-    (void)user;
-    (void)img;
-    return NULL; /* image decoding arrives in a later milestone */
+    Page *p = user;
+    char *u = image_url_for(p, img);
+    if (!u) return NULL;
+    Image *res = NULL;
+    for (PageImage *pi = p->images; pi; pi = pi->next)
+        if (!pi->failed && !strcmp(pi->url, u)) { res = &pi->img; break; }
+    free(u);
+    return res;
 }
 
 void page_layout(Page *p, float vw, float vh) {
@@ -250,6 +365,14 @@ void page_layout(Page *p, float vw, float vh) {
 void page_free(Page *p) {
     if (!p) return;
     layout_free(p->layout);
+    for (PageImage *pi = p->images; pi;) {
+        PageImage *nx = pi->next;
+        image_free(&pi->img);
+        free(pi->url);
+        free(pi);
+        pi = nx;
+    }
+    free(p->base);
     for (int i = 1; i < p->nsheets; i++) css_free(p->sheets[i]);
     free(p->sheets);
     arena_free(&p->style_arena);

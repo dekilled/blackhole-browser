@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Imagens</title>
+<style>
+ body{font-family:sans-serif;margin:20px;background:#eef}
+ img{border:2px solid #333;margin:6px;vertical-align:top}
+ .fit{max-width:100%;height:auto}
+ .ph{width:120px;height:80px}
+</style></head><body>
+<h2>PNG, JPEG progressivo, GIF entrelaçado e PNG com alpha</h2>
+<p><img src="rose.png" alt="rosa png"><img src="rose.jpg" alt="rosa jpg"><img src="rose.gif" alt="rosa gif"><img src="alpha.png" alt="alpha"></p>
+<p>Imagem ausente: <img src="nao-existe.png" alt="[texto alternativo]"> e escalada: <img src="rose.png" class="ph" alt=""></p>
+<p>Lazy: <img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" data-src="rose.jpg" alt="lazy" width="105"></p>
+<img class="fit" src="rose.png" style="width:600px">
+</body></html>
