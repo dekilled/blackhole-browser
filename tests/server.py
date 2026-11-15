@@ -62,7 +62,7 @@ class H(http.server.BaseHTTPRequestHandler):
                 for piece in (b"<h1>parcial</h1>", b"<p>chegou ate aqui</p>"):
                     self.wfile.write(b"%x\r\n%s\r\n" % (len(piece), piece))
             elif p == "/trunc-gz":
-                z = gzip.compress(b"<h1>gzip parcial</h1>" + b"<p>linha de texto</p>" * 200)
+                z = gzip.compress(b"<h1>gzip parcial</h1>" + b"".join(b"<p>linha %d com texto variado %d</p>" % (i, i * 7919 % 1000) for i in range(600)))
                 piece = z[: len(z) // 2]
                 self.wfile.write(b"%x\r\n%s\r\n" % (len(piece), piece))
             self.wfile.flush()
