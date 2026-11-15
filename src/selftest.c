@@ -6,6 +6,7 @@
 #include "css.h"
 #include "dom.h"
 #include "html.h"
+#include "js.h"
 #include "layout.h"
 #include "page.h"
 #include "style.h"
@@ -172,6 +173,64 @@ static void test_compat(void) {
     page_free(p);
 }
 
+static void test_js_parser(void) {
+    static const struct { const char *src, *want; } golden[] = {
+        {"1+2*3", "(program (expr (binary + (num 1) (binary * (num 2) (num 3)))))"},
+        {"a=b=c", "(program (expr (assign = (id a) (assign = (id b) (id c)))))"},
+        {"2**3**2", "(program (expr (binary ** (num 2) (binary ** (num 3) (num 2)))))"},
+        {"a?b:c?d:e", "(program (expr (cond (id a) (id b) (cond (id c) (id d) (id e)))))"},
+        {"a\n++b", "(program (expr (id a)) (expr (update ++ prefix (id b))))"},            /* ASI before a prefix operator */
+        {"a\n(b)", "(program (expr (call (id a) (id b))))"},                             /* no ASI before '(' */
+        {"var x = 1\nvar y = 2", "(program (var var (decl (id x) (num 1))) (var var (decl (id y) (num 2))))"},
+        {"x = a / b / c", "(program (expr (assign = (id x) (binary / (binary / (id a) (id b)) (id c)))))"},
+        {"x = /ab+/g", "(program (expr (assign = (id x) (regex /ab+/g))))"},
+        {"`a${1}b`", "(program (expr (template (str \"a\") (num 1) (str \"b\"))))"},
+        {"[a, b] = [b, a]", "(program (expr (assign = (array-pat (id a) (id b)) (array (id b) (id a)))))"},
+        {"a?.b.c", "(program (expr (optchain (member (member ?. (id a) (id b)) (id c)))))"},
+        {"async x => await x", "(program (expr (func => async (await (id x)) (id x))))"},
+        {"f(...a, b)", "(program (expr (call (id f) (spread (id a)) (id b))))"},
+        {"new Foo.Bar(1)", "(program (expr (new (member (id Foo) (id Bar)) (num 1))))"},
+        {"label: for (;;) break label", "(program (label label (for (break label))))"},
+        {"try { x } catch { y } finally { z }", "(program (try (block (expr (id x))) (block (expr (id y))) (block (expr (id z)))))"},
+        {"typeof a === \"x\"", "(program (expr (binary === (unary typeof (id a)) (str \"x\"))))"},
+        {"(x => x)(1)", "(program (expr (call (func => (id x) (id x)) (num 1))))"},    /* parenthesised arrow can be called */
+        {"'\\u{1F600}\\x41\\n'", "(program (expr (str \"\xF0\x9F\x98\x80" "A\n\")))"},
+    };
+    for (size_t i = 0; i < sizeof golden / sizeof *golden; i++) {
+        Arena         a = {0};
+        JsParseResult r;
+        js_parse(&a, golden[i].src, strlen(golden[i].src), &r);
+        Buf o;
+        buf_init(&o);
+        if (r.program) js_dump(r.program, &o);
+        else buf_printf(&o, "ERRO: %s", r.error);
+        check_str(golden[i].src, o.data, golden[i].want);
+        buf_free(&o);
+        arena_free(&a);
+    }
+    static const char *bad[] = {"var", "a b", "x = ;", "if (", "function(){}", "return 1", "1 = 2", "({a:1} = 1)", "a ?? b || c", "const a;",
+                                "class { }", "let [a];", "x = `abc", "'abc", "/* x", "for (a, b of c);", "new.foo", "import x from 'y'", "{", "a =>", "(a, b", "[1, 2"};
+    for (size_t i = 0; i < sizeof bad / sizeof *bad; i++) {
+        Arena         a = {0};
+        JsParseResult r;
+        js_parse(&a, bad[i], strlen(bad[i]), &r);
+        g_total++;
+        if (r.program) { g_fail++; printf("  FALHOU: deveria ser erro de sintaxe: %s\n", bad[i]); }
+        arena_free(&a);
+    }
+    static const char *good[] = {"", ";;;", "// só comentário", "#!/usr/bin/env node\nx", "a = { if: 1, class: 2 }.if", "let async = 1; async\n(x)", "var of = 1; for (of of of);",
+                                 "x = y\n/re/g.test(z)", "label: { break label; }", "a = b ? c => d : e", "f()++", "\xEF\xBB\xBF" "x", "class A { static { this.x = 1 } #p = 2; static async *[Symbol.iterator]() {} }",
+                                 "for (const [a, {b}] of c) ;", "a = async function* () { for await (const x of y) yield* x }"};
+    for (size_t i = 0; i < sizeof good / sizeof *good; i++) {
+        Arena         a = {0};
+        JsParseResult r;
+        js_parse(&a, good[i], strlen(good[i]), &r);
+        g_total++;
+        if (!r.program) { g_fail++; printf("  FALHOU: deveria ser válido: %s -> %s (%d:%d)\n", good[i], r.error, r.line, r.col); }
+        arena_free(&a);
+    }
+}
+
 static void test_parser_robustness(void) {
     Arena a = {0};
     Node *d = html_parse(&a, "<p>um<p>dois<ul><li>a<li>b</ul><table><td>x</table><b><i>mal</b></i>", 0);
@@ -194,6 +253,7 @@ int selftest_run(void) {
     test_layout();
     test_float_and_pseudo();
     test_compat();
+    test_js_parser();
     test_parser_robustness();
     printf("selftest: %d verificacoes, %d falhas\n", g_total, g_fail);
     return g_fail ? 1 : 0;

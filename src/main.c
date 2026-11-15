@@ -9,6 +9,7 @@
 #include "diag.h"
 #include "dom.h"
 #include "gfx.h"
+#include "js.h"
 #include "img.h"
 #include "html.h"
 #include "layout.h"
@@ -20,6 +21,43 @@
 
 int selftest_run(void);
 int diagnose_run(const char *url, int W, int H);
+
+/* --js-parse FILE | --js-ast FILE | --js-ast -e CODE */
+static int js_cli(int argc, char **argv) {
+    bool ast = !strcmp(argv[1], "--js-ast");
+    Buf  src;
+    buf_init(&src);
+    const char *name = argv[argc - 1];
+    if (argc >= 4 && !strcmp(argv[2], "-e")) {
+        buf_puts(&src, argv[3]);
+        name = "<-e>";
+    } else {
+        FILE *f = fopen(argv[2], "rb");
+        if (!f) { fprintf(stderr, "não consegui abrir %s\n", argv[2]); return 2; }
+        char tmp[65536];
+        size_t k;
+        while ((k = fread(tmp, 1, sizeof tmp, f)) > 0) buf_append(&src, tmp, k);
+        fclose(f);
+        name = argv[2];
+    }
+    Arena         a = {0};
+    JsParseResult r;
+    js_parse(&a, src.data ? src.data : "", src.len, &r);
+    int rc = 0;
+    if (!r.program) {
+        fprintf(stderr, "SyntaxError: %s (%s:%d:%d)\n", r.error, name, r.line, r.col);
+        rc = 1;
+    } else if (ast) {
+        Buf o;
+        buf_init(&o);
+        js_dump(r.program, &o);
+        puts(o.data);
+        buf_free(&o);
+    } else printf("OK %d nós\n", r.nodes);
+    arena_free(&a);
+    buf_free(&src);
+    return rc;
+}
 
 static void dump_dom(const Node *root) {
     const Node *n = root;
@@ -91,6 +129,7 @@ int main(int argc, char **argv) {
         return 0;
     }
     if (argc == 2 && !strcmp(argv[1], "--selftest")) return selftest_run();
+    if (argc >= 3 && (!strcmp(argv[1], "--js-parse") || !strcmp(argv[1], "--js-ast"))) return js_cli(argc, argv);
     const char *shot = NULL, *url = NULL;
     int         W = 1024, H = 768;
     float       scroll = 0;

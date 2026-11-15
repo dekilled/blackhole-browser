@@ -38,7 +38,7 @@ formulários (GET/POST), histórico persistente, IDN/punycode, HSTS.
 processo de renderização separado, sandbox (`seccomp-bpf` + namespaces), IPC com validação,
 same-origin policy, CORS, CSP, isolamento de sites.
 
-**M5 — Motor JavaScript** · *anos, e é a maior parede técnica do projeto*
+**M5 — Motor JavaScript** · *anos, e é a maior parede técnica do projeto* — **fase 1 (parser) concluída; ver [`JS_ENGINE.md`](JS_ENGINE.md)**
 Parser ES2023+, compilador para bytecode, VM, GC (com cuidado para não vazar em ciclos DOM↔JS),
 Promise/async/await, geradores, módulos, RegExp (backtracking seguro), Proxy/Reflect, Intl, Date,
 BigInt, TypedArrays, WeakRef... E só então os **bindings de DOM** (centenas de interfaces),

@@ -87,6 +87,15 @@ else
     echo "  (ImageMagick ausente: pulando)"
 fi
 
+echo "== parser JavaScript vs V8 (node)"
+NODE=$(command -v node || ls /opt/node22/bin/node 2>/dev/null | head -1)
+if [ -n "$NODE" ]; then
+    check "parser JS concorda com o V8 em 1500 arquivos reais" "BH_BIN=$BIN BH_NODE=$NODE python3 tools/js_diff.py 1500 > $TMP/jsdiff.txt 2>&1"
+    check "parser JS: mutacoes sem bugs nossos (aceitar/rejeitar)" "BH_BIN=$BIN BH_NODE=$NODE python3 tools/js_mutdiff.py 100 6 5 > $TMP/jsmut.txt 2>&1"
+else
+    echo "  (node ausente: pulando)"
+fi
+
 echo
 printf "resultado: %d ok, %d falhas\n" $PASS $FAIL
 [ $FAIL -eq 0 ]

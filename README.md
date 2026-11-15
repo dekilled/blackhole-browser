@@ -23,6 +23,7 @@ Veja [`docs/ROADMAP.md`](docs/ROADMAP.md) e [`docs/ARCHITECTURE.md`](docs/ARCHIT
 - Imagens: decodificadores **PNG, JPEG (baseline + progressivo) e GIF escritos do zero**
 - Renderizador de software próprio (canvas, texto via FreeType) e janela X11
 - Carregamento em thread (a janela nunca congela), histórico, âncoras, barra de endereço com indicador de segurança
+- **Parser de JavaScript** (ES2022) validado contra o V8: 100% de concordância em 4.686 arquivos reais (`docs/JS_ENGINE.md`); interpretador em construção
 - Fuzzing sob ASan/UBSan (`tools/fuzz.py`, `tools/fuzz_img.py`) e suíte de regressão (`make test`)
 
 > ⚠️ **Ainda não há JavaScript, cookies, vídeo nem sandbox.** Não use como navegador principal.
