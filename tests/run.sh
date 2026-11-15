@@ -47,7 +47,7 @@ for y in range(h):
 print(n*10000//(w*h*3))
 PY
 }
-for f in hello messy index flex position; do
+for f in hello messy index flex position pseudo float visual; do
     check "render $f.html" "$BIN --screenshot $TMP/$f.png --size 900x600 tests/pages/$f.html 2>/dev/null && [ \$(nonwhite $TMP/$f.png) -gt 0 ]"
 done
 check "render via HTTP com imagens" "$BIN --screenshot $TMP/img.png --size 900x560 $H/images.html 2>/dev/null && [ \$(nonwhite $TMP/img.png) -gt 3 ]"

@@ -28,6 +28,8 @@ typedef struct Node {
 } Node;
 
 #define NODE_HOVER 0x1u
+#define NODE_PSEUDO 0x2u        /* generated ::before / ::after box */
+#define NODE_PSEUDO_BEFORE 0x4u
 
 Node       *dom_new_document(Arena *a);
 Node       *dom_new_element(Arena *a, const char *tag);

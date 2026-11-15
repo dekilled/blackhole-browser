@@ -127,6 +127,28 @@ static void test_layout(void) {
     page_free(p);
 }
 
+static void test_float_and_pseudo(void) {
+    Page *p = page_from_html("about:test",
+        "<style>body{margin:0}p{margin:0}b::before{content:\"[\"}b::after{content:\"]\"}"
+        "#f{float:left;width:100px;height:50px}#r{float:right;width:100px;height:50px}"
+        "#c{clear:both;height:5px}</style>"
+        "<div id=f></div><div id=r></div><p id=p>texto ao lado</p><div id=c></div><b id=b>x</b>");
+    page_layout(p, 400, 300);
+    float yf = layout_find_anchor(p->layout, "f"), yp = layout_find_anchor(p->layout, "p"), yc = layout_find_anchor(p->layout, "c");
+    CHECK(yf == 0 && yp == 0);    /* the paragraph flows beside the floats, it does not go below them */
+    CHECK(yc >= 50);              /* clear:both moves below both floats */
+    Node *b = find_id(p->doc, "b");
+    CHECK(b && b->first_child && (b->first_child->flags & NODE_PSEUDO) && b->last_child && (b->last_child->flags & NODE_PSEUDO));
+    char *txt = b ? dom_text_content(b) : xstrdup("");
+    check_str("textContent ignora pseudo-elementos", txt, "x");
+    free(txt);
+    page_layout(p, 500, 300); /* relayout must not duplicate generated nodes */
+    int n = 0;
+    for (Node *c = b->first_child; c; c = c->next) n++;
+    CHECK(n == 3);
+    page_free(p);
+}
+
 static void test_parser_robustness(void) {
     Arena a = {0};
     Node *d = html_parse(&a, "<p>um<p>dois<ul><li>a<li>b</ul><table><td>x</table><b><i>mal</b></i>", 0);
@@ -147,6 +169,7 @@ int selftest_run(void) {
     test_entities();
     test_cascade();
     test_layout();
+    test_float_and_pseudo();
     test_parser_robustness();
     printf("selftest: %d verificacoes, %d falhas\n", g_total, g_fail);
     return g_fail ? 1 : 0;

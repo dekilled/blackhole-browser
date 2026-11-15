@@ -1,0 +1,17 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Float</title><style>
+body{font-family:sans-serif;margin:16px;background:#fff;font-size:15px}
+.fl{float:left;width:120px;height:90px;background:#7c3aed;color:#fff;margin:0 14px 8px 0;padding:6px}
+.fr{float:right;width:100px;height:60px;background:#0d9488;color:#fff;margin:0 0 8px 14px}
+.cols:after{content:"";display:block;clear:both}
+.col{float:left;width:32%;margin-right:2%;background:#f3f0ff;padding:8px;box-sizing:border-box}
+.nav li{float:left;list-style:none;padding:6px 14px;background:#222;color:#fff;margin-right:4px}
+.nav{margin:0;padding:0;overflow:hidden}
+hr.c{clear:both;border:0;border-top:2px solid #ccc}
+</style></head><body>
+<div class="fl">flutuante esquerda</div><div class="fr">direita</div>
+<p>Este texto contorna as caixas flutuantes: Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.</p>
+<hr class="c">
+<ul class="nav"><li>Início</li><li>Produtos</li><li>Contato</li></ul>
+<div class="cols"><div class="col">coluna um com texto</div><div class="col">coluna dois com um pouco mais de texto para quebrar linha</div><div class="col">três</div></div>
+<p>Depois do clearfix.</p>
+</body></html>

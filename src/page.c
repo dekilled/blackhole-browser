@@ -360,7 +360,7 @@ void page_layout(Page *p, float vw, float vh) {
     arena_free(&p->style_arena);
     p->vw = vw;
     p->vh = vh;
-    StyleSet set = {p->sheets, p->nsheets, {vw, vh}};
+    StyleSet set = {p->sheets, p->nsheets, {vw, vh}, &p->dom_arena};
     style_compute_tree(p->doc, &set, &p->style_arena);
     p->layout = layout_create(p->doc, vw, vh, resolve_image, p);
 }

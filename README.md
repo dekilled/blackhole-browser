@@ -18,6 +18,7 @@ Veja [`docs/ROADMAP.md`](docs/ROADMAP.md) e [`docs/ARCHITECTURE.md`](docs/ARCHIT
 - Layout: blocos, inline/line-breaking, margin collapsing, tabelas, inline-block
 - Interface com **abas**, barra de endereço em pílula e página de nova aba (renderizada pelo próprio motor)
 - `border-radius`, `linear/radial-gradient`, `box-shadow`
+- `::before`/`::after` (com `content`, `attr()`), `float`/`clear`
 - Flexbox, `position` (relative/absolute/fixed), tabelas, inline-block, controles de formulário
 - Imagens: decodificadores **PNG, JPEG (baseline + progressivo) e GIF escritos do zero**
 - Renderizador de software próprio (canvas, texto via FreeType) e janela X11
@@ -45,6 +46,7 @@ make test         # testes
 build/blackhole --screenshot saida.png tests/pages/hello.html
 build/blackhole --screenshot saida.png --size 1280x800 https://exemplo.com
 build/blackhole --dom arquivo.html        # imprime a árvore DOM
+build/blackhole --diagnose https://site   # explica o que o motor ignorou / se é uma SPA de JS
 build/blackhole                           # abre a janela (precisa de X11 / XWayland)
 build/blackhole https://exemplo.com       # abre direto numa URL
 ```

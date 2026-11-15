@@ -17,7 +17,21 @@ typedef struct {
     Box          *cb_stack[MAX_CB];
     int           ncb;
     Box          *root;
+    struct FloatList *fl;       /* float list of the block formatting context being laid out */
+    float         fl_ox, fl_oy; /* content origin of the current block, in that list's coordinates */
+    float         child_dx, child_dy; /* estimated offset of the next child inside its parent's content box */
 } LC;
+
+typedef struct {
+    float x, y, w, h; /* margin box, in list coordinates */
+    bool  left;
+} FloatBox;
+
+typedef struct FloatList {
+    FloatBox *v;
+    int       n, cap;
+    float     last_top;
+} FloatList;
 
 #define VPUSH(a, arr, n, cap, T, val)                                                  \
     do {                                                                               \
@@ -543,6 +557,8 @@ typedef struct {
     float     run_x, run_w;
     float     asc, desc;
     int       nlines;
+    FloatList *fl;
+    float     fox, foy, line_left, line_right, strut_h;
 } LS;
 
 static void flush_run(LS *ls) {
@@ -586,10 +602,25 @@ static void add_text(LS *ls, const char *text, int len, float w, const Style *st
     ls->has_content = true;
 }
 
+static void line_bounds(LS *ls) {
+    ls->line_left = 0;
+    ls->line_right = ls->avail;
+    if (!ls->fl || !ls->fl->n) return;
+    float top = ls->foy + ls->y, bot = top + (ls->strut_h > 1 ? ls->strut_h : 1);
+    for (int i = 0; i < ls->fl->n; i++) {
+        const FloatBox *f = &ls->fl->v[i];
+        if (f->y >= bot || f->y + f->h <= top) continue;
+        if (f->left) { if (f->x + f->w - ls->fox > ls->line_left) ls->line_left = f->x + f->w - ls->fox; }
+        else if (f->x - ls->fox < ls->line_right) ls->line_right = f->x - ls->fox;
+    }
+    if (ls->line_right < ls->line_left) ls->line_right = ls->line_left;
+}
+
 static void finalize_line(LS *ls, bool force) {
     flush_run(ls);
     if (!ls->has_content && !force) {
-        ls->cur_x = 0;
+        line_bounds(ls);
+        ls->cur_x = ls->line_left;
         ls->first_line = false;
         for (int i = 0; i < ls->nopen; i++) {
             ls->open[i].start_x = 0;
@@ -616,7 +647,7 @@ static void finalize_line(LS *ls, bool force) {
     }
     if (ls->emit) {
         float baseline = ls->y + asc;
-        float free_w = ls->avail - ls->cur_x;
+        float free_w = ls->line_right - ls->cur_x;
         float dx = 0;
         if (free_w > 0) {
             if (b->style->text_align == TA_CENTER) dx = free_w / 2;
@@ -658,7 +689,8 @@ static void finalize_line(LS *ls, bool force) {
     }
     ls->y += asc + desc;
     ls->nlines++;
-    ls->cur_x = 0;
+    line_bounds(ls);
+    ls->cur_x = ls->line_left;
     ls->first_line = false;
     ls->has_content = false;
     ls->pending_space = false;
@@ -666,7 +698,7 @@ static void finalize_line(LS *ls, bool force) {
     ls->frag0 = ls->b->nfrags;
     ls->nlspans = 0;
     for (int i = 0; i < ls->nopen; i++) {
-        ls->open[i].start_x = 0;
+        ls->open[i].start_x = ls->line_left;
         ls->open[i].first = false;
     }
 }
@@ -706,7 +738,17 @@ static float layout_inline(LC *lc, Box *b, float avail, bool emit, float *extent
         b->spans = NULL; b->nspans = b->capspans = 0;
     }
     float indent = len_resolve(&(Length){b->style->text_indent, 0, false}, avail, 0);
-    ls->cur_x = indent;
+    {
+        BhFont *sf0 = layout_style_font(b->style);
+        float sa0, sd0;
+        line_metrics(b->style, sf0, &sa0, &sd0);
+        ls->strut_h = sa0 + sd0;
+    }
+    ls->fl = emit ? lc->fl : NULL;
+    ls->fox = lc->fl_ox;
+    ls->foy = lc->fl_oy;
+    line_bounds(ls);
+    ls->cur_x = ls->line_left + indent;
 
     int n = b->nitems;
     for (int i = 0; i < n;) {
@@ -747,7 +789,21 @@ static float layout_inline(LC *lc, Box *b, float avail, bool emit, float *extent
             }
         }
         float need = gw + (ls->has_content && ls->pending_space ? ls->space_w : 0);
-        if (ls->wrap && ls->has_content && ls->cur_x + need > avail + 0.5f) finalize_line(ls, false);
+        if (ls->fl && ls->fl->n && ls->wrap && !ls->has_content && need <= avail && ls->cur_x + need > ls->line_right + 0.5f) {
+            /* the line is squeezed by floats: slide down to the first float bottom and retry */
+            float top = ls->foy + ls->y, nb = LAYOUT_INF;
+            for (int fi = 0; fi < ls->fl->n; fi++) {
+                const FloatBox *f = &ls->fl->v[fi];
+                if (f->y < top + ls->strut_h && f->y + f->h > top && f->y + f->h < nb) nb = f->y + f->h;
+            }
+            if (nb < LAYOUT_INF && nb > top) {
+                ls->y = nb - ls->foy;
+                line_bounds(ls);
+                ls->cur_x = ls->line_left;
+                continue;
+            }
+        }
+        if (ls->wrap && ls->has_content && ls->cur_x + need > ls->line_right + 0.5f) finalize_line(ls, false);
         if (ls->has_content && ls->pending_space) {
             add_text(ls, " ", 1, ls->space_w, ls->space_style, ls->space_font, ls->space_link);
         }
@@ -1188,6 +1244,7 @@ static float layout_flex(LC *lc, Box *c, float W, float def_h, float min_h, floa
         const Style *is = b->style;
         FItem *f = &it[i];
         f->b = b;
+        b->bfc = true;
         if (b->kind == BK_REPLACED) { size_replaced(lc, b, W); } else resolve_box_model(b, W);
         resolve_box_model(b, W);
         float hpad = b->p[1] + b->p[3] + b->bw[1] + b->bw[3], vpad = b->p[0] + b->p[2] + b->bw[0] + b->bw[2];
@@ -1354,6 +1411,64 @@ static float layout_flex(LC *lc, Box *c, float W, float def_h, float min_h, floa
     return extent;
 }
 
+
+/* ================================================================== floats ===== */
+static float fl_clear_bottom(const FloatList *fl, int mask) {
+    float m = -LAYOUT_INF;
+    if (fl)
+        for (int i = 0; i < fl->n; i++)
+            if ((fl->v[i].left && (mask & 1)) || (!fl->v[i].left && (mask & 2))) m = fmaxf_(m, fl->v[i].y + fl->v[i].h);
+    return m;
+}
+
+/* Lays out a floated child and registers it. y_in_parent is where the float would start in the parent's
+ * content space. Returns the float's bottom edge in the parent's content space. */
+static float place_float(LC *lc, Box *b, Box *c, float content_w, float y_in_parent) {
+    FloatList *fl = lc->fl;
+    resolve_box_model(c, content_w);
+    float forced;
+    const Style *cs = c->style;
+    float hpad = c->p[1] + c->p[3] + c->bw[1] + c->bw[3];
+    if (c->kind == BK_REPLACED) forced = -1;
+    else if (!cs->width.is_auto) forced = len_resolve(&cs->width, content_w, 0) + (cs->box_sizing_border ? 0 : hpad);
+    else {
+        float mn, mx;
+        measure_box(lc, c, &mn, &mx);
+        forced = fminf_(mx, fmaxf_(mn, content_w - c->m[1] - c->m[3]));
+    }
+    lc->child_dx = c->m[3];
+    lc->child_dy = y_in_parent + c->m[0];
+    layout_block(lc, c, content_w, forced);
+    float fw = c->w + c->m[1] + c->m[3], fh = c->h + c->m[0] + c->m[2];
+    bool  left = cs->float_ == FL_LEFT;
+    float pox = lc->fl_ox, poy = lc->fl_oy;
+    float y = poy + y_in_parent;
+    if (y < fl->last_top) y = fl->last_top;
+    float x = pox;
+    for (int guard = 0; guard < 64; guard++) {
+        float L = pox, R = pox + content_w, nb = LAYOUT_INF;
+        bool  overlap = false;
+        for (int i = 0; i < fl->n; i++) {
+            const FloatBox *f = &fl->v[i];
+            if (f->y >= y + fh || f->y + f->h <= y) continue;
+            overlap = true;
+            if (f->left) L = fmaxf_(L, f->x + f->w); else R = fminf_(R, f->x);
+            if (f->y + f->h < nb) nb = f->y + f->h;
+        }
+        if (!overlap || fw <= R - L + 0.01f) { x = left ? L : R - fw; break; }
+        if (nb >= LAYOUT_INF) { x = left ? L : R - fw; break; }
+        y = nb;
+    }
+    FloatBox fb = {x, y, fw, fh, left};
+    VPUSH(lc->a, fl->v, fl->n, fl->cap, FloatBox, fb);
+    fl->last_top = y;
+    c->x = b->cx + (x - pox) + c->m[3];
+    c->y = b->cy + (y - poy) + c->m[0];
+    c->mt_eff = c->m[0];
+    c->mb_eff = c->m[2];
+    return (y - poy) + fh;
+}
+
 /* =============================================================== block layout == */
 static float resolve_content_min(const Style *st, const Length *l, float cb_w, float hpad, float dflt) {
     if (l->is_auto) return dflt;
@@ -1362,7 +1477,8 @@ static float resolve_content_min(const Style *st, const Length *l, float cb_w, f
     return v;
 }
 
-static void layout_block(LC *lc, Box *b, float cb_w, float forced_bw) {
+static void layout_block_inner(LC *lc, Box *b, float cb_w, float forced_bw);
+static void layout_block_inner(LC *lc, Box *b, float cb_w, float forced_bw) {
     const Style *st = b->style;
     if (b->kind == BK_REPLACED) {
         size_replaced(lc, b, cb_w);
@@ -1460,7 +1576,21 @@ static void layout_block(LC *lc, Box *b, float cb_w, float forced_bw) {
         bool  collapse_top = !b->bfc && b->p[0] == 0 && b->bw[0] == 0;
         float cursor = 0, prev_mb = 0;
         bool  first = true;
+        float floats_bottom = 0;
+        float poy_ = lc->fl_oy;
         for (Box *c = b->first; c; c = c->next) {
+            if (c->style->float_ != FL_NONE && c->kind != BK_ANON) {
+                float fb = place_float(lc, b, c, content_w, cursor + (first ? 0 : (prev_mb > 0 ? prev_mb : 0)));
+                if (fb > floats_bottom) floats_bottom = fb;
+                continue;
+            }
+            float clear_need = -LAYOUT_INF;
+            if (c->style->clear) clear_need = fl_clear_bottom(lc->fl, c->style->clear) - poy_;
+            float mt_est = c->style->margin[0].is_auto ? 0 : len_resolve(&c->style->margin[0], content_w, 0);
+            float est_dy = first ? (collapse_top ? 0 : mt_est) : cursor + collapse_margins(prev_mb, mt_est);
+            if (est_dy < clear_need) est_dy = clear_need;
+            lc->child_dy = est_dy;
+            lc->child_dx = c->style->margin[3].is_auto ? 0 : len_resolve(&c->style->margin[3], content_w, 0);
             layout_block(lc, c, content_w, -1);
             float cmt = c->mt_eff, cy_;
             if (first) {
@@ -1471,6 +1601,7 @@ static void layout_block(LC *lc, Box *b, float cb_w, float forced_bw) {
             } else {
                 cy_ = cursor + collapse_margins(prev_mb, cmt);
             }
+            if (cy_ < clear_need) { cy_ = clear_need; if (first && collapse_top) mt = b->m[0]; }
             c->y = b->cy + cy_;
             c->x = b->cx + c->m[3];
             apply_relative(c, content_w, 0);
@@ -1486,6 +1617,7 @@ static void layout_block(LC *lc, Box *b, float cb_w, float forced_bw) {
                 content_h = cursor;
             } else content_h = cursor + prev_mb;
         }
+        if (b->bfc && floats_bottom > content_h) content_h = floats_bottom; /* a BFC root contains its floats */
     }
     float h = content_h;
     if (!st->height.is_auto && st->height.pct == 0) {
@@ -1505,6 +1637,23 @@ static void layout_block(LC *lc, Box *b, float cb_w, float forced_bw) {
     b->mt_eff = mt;
     b->mb_eff = mb;
     if (b->abs_first) layout_abs_children(lc, b);
+}
+
+static void layout_block(LC *lc, Box *b, float cb_w, float forced_bw) {
+    FloatList *sfl = lc->fl;
+    float      sox = lc->fl_ox, soy = lc->fl_oy;
+    if (b->kind != BK_REPLACED) resolve_box_model(b, cb_w);
+    if (b->bfc || !lc->fl) {
+        lc->fl = arena_alloc(lc->a, sizeof(FloatList));
+        lc->fl_ox = lc->fl_oy = 0;
+    } else {
+        lc->fl_ox = sox + lc->child_dx + b->bw[3] + b->p[3];
+        lc->fl_oy = soy + lc->child_dy + b->bw[0] + b->p[0];
+    }
+    layout_block_inner(lc, b, cb_w, forced_bw);
+    lc->fl = sfl;
+    lc->fl_ox = sox;
+    lc->fl_oy = soy;
 }
 
 static void layout_atom(LC *lc, Box *a, float avail) {
@@ -1646,7 +1795,7 @@ static Box *build_block_box(LC *lc, const Node *n, int depth) {
     }
     if (n->style->display == DISP_LIST_ITEM) b->ordinal = list_ordinal(n);
     const Style *st = n->style;
-    b->bfc = st->overflow != OV_VISIBLE || st->display == DISP_TABLE_CELL || st->display == DISP_INLINE_BLOCK ||
+    b->bfc = st->float_ != FL_NONE || st->overflow != OV_VISIBLE || st->display == DISP_TABLE_CELL || st->display == DISP_INLINE_BLOCK ||
              st->display == DISP_FLEX || st->display == DISP_INLINE_FLEX || st->display == DISP_TABLE_CAPTION;
     bool positioned = st->position != POS_STATIC || !n->parent || n->parent->type == NODE_DOCUMENT;
     if (positioned && lc->ncb < MAX_CB) lc->cb_stack[lc->ncb++] = b;

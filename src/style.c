@@ -510,6 +510,7 @@ typedef struct {
     const Style *parent;
     LenCtx       lc;
     Style        initial;
+    const Node  *node;
 } Apply;
 
 static int map_font_size_kw(const char *w, float parent_fs, float *out) {
@@ -1161,6 +1162,44 @@ static void apply_decl(Apply *ap, const Decl *d, int pass) {
         s->position = streq(w0, "relative") ? POS_RELATIVE : streq(w0, "absolute") ? POS_ABSOLUTE : streq(w0, "fixed") ? POS_FIXED
                     : streq(w0, "sticky") ? POS_STICKY : POS_STATIC;
         break;
+    case PROP_CONTENT: {
+        s->content = NULL;
+        if (n == 1 && (streq(w0, "none") || streq(w0, "normal"))) break;
+        Buf out;
+        buf_init(&out);
+        for (const char *p = val; *p;) {
+            if (*p == '"' || *p == '\'') {
+                char q = *p++;
+                while (*p && *p != q) {
+                    if (*p == '\\' && p[1]) {
+                        p++;
+                        if (hex_val((unsigned char)*p) >= 0) {
+                            uint32_t cp = 0;
+                            int k = 0;
+                            while (k < 6 && hex_val((unsigned char)*p) >= 0) { cp = cp * 16 + (uint32_t)hex_val((unsigned char)*p); p++; k++; }
+                            if (*p == ' ') p++;
+                            buf_put_utf8(&out, cp ? cp : 0xFFFD);
+                        } else if (*p == '\n') p++;
+                        else buf_putc(&out, *p++);
+                    } else buf_putc(&out, *p++);
+                }
+                if (*p) p++;
+            } else if (!strncasecmp(p, "attr(", 5) && ap->node) {
+                const char *e = strchr(p, ')');
+                if (!e) break;
+                char *name = xstrndup(p + 5, (size_t)(e - p - 5));
+                const char *v = dom_attr(ap->node, str_trim(name));
+                if (v) buf_puts(&out, v);
+                free(name);
+                p = e + 1;
+            } else if (!strncasecmp(p, "open-quote", 10)) { buf_puts(&out, "\xE2\x80\x9C"); p += 10; }
+            else if (!strncasecmp(p, "close-quote", 11)) { buf_puts(&out, "\xE2\x80\x9D"); p += 11; }
+            else p++;
+        }
+        s->content = arena_strndup(ap->arena, out.data ? out.data : "", out.len);
+        buf_free(&out);
+        break;
+    }
     case PROP_BORDER_RADIUS: apply_radius(ap, s->radius, words, n); break;
     case PROP_BORDER_TOP_LEFT_RADIUS: case PROP_BORDER_TOP_RIGHT_RADIUS: case PROP_BORDER_BOTTOM_RIGHT_RADIUS: case PROP_BORDER_BOTTOM_LEFT_RADIUS:
         if (parse_length(&ap->lc, w0, &l, false)) s->radius[id - PROP_BORDER_TOP_LEFT_RADIUS] = l;
@@ -1347,61 +1386,133 @@ static Decl *presentational_hints(Arena *a, const Node *n) {
     return d;
 }
 
+typedef struct {
+    const StyleSet *set;
+    Arena          *arena;
+    SrcList         srcs;
+    Apply           ap;
+    float           root_fs;
+} SC;
+
+/* Computes the style of element `n` (pe = 0) or of its ::before (1) / ::after (2) box. */
+static Style *compute_one(SC *sc, Node *n, const Style *parent, int pe) {
+    const StyleSet *set = sc->set;
+    SrcList        *srcs = &sc->srcs;
+    srcs->n = 0;
+    for (int si = 0; si < set->nsheets; si++) {
+        const Stylesheet *sh = set->sheets[si];
+        uint64_t          origin = sh->origin == 0 ? 0 : 2;
+        for (int ri = 0; ri < sh->nrules; ri++) {
+            const Rule *r = &sh->rules[ri];
+            if (r->media && !media_matches(r->media, &set->vp)) continue;
+            long spec = css_rule_match(r, n, pe);
+            if (spec < 0) continue;
+            srclist_push(srcs, r->decls, (origin << 56) | ((uint64_t)spec << 32) | (uint64_t)((si << 20) | ri));
+        }
+    }
+    if (!pe) {
+        Decl *hints = presentational_hints(sc->arena, n);
+        if (hints) srclist_push(srcs, hints, (uint64_t)1 << 56);
+        const char *inline_style = dom_attr(n, "style");
+        if (inline_style) {
+            Decl *d = css_parse_decls(sc->arena, inline_style, strlen(inline_style));
+            if (d) srclist_push(srcs, d, (uint64_t)3 << 56);
+        }
+    } else if (!srcs->n) {
+        return NULL; /* no rule targets this pseudo-element */
+    }
+    qsort(srcs->v, (size_t)srcs->n, sizeof(DeclSrc), cmp_src);
+
+    Style *s = arena_alloc(sc->arena, sizeof *s);
+    style_init(s);
+    if (parent) style_inherit_from(s, parent);
+    Apply *ap = &sc->ap;
+    ap->st = s;
+    ap->parent = parent;
+    ap->node = n;
+    ap->lc.font_size = s->font_size;
+    ap->lc.root_fs = sc->root_fs;
+    ap->lc.vp = set->vp;
+    for (int pass = PASS_CUSTOM; pass <= PASS_REST; pass++) {
+        for (int imp = 0; imp < 2; imp++)
+            for (int i = 0; i < srcs->n; i++)
+                for (const Decl *d = srcs->v[i].decls; d; d = d->next)
+                    if ((int)d->important == imp) apply_decl(ap, d, pass);
+        if (pass == PASS_FONTSIZE) ap->lc.font_size = s->font_size;
+    }
+    if (!pe && (!n->parent || n->parent->type == NODE_DOCUMENT)) sc->root_fs = s->font_size;
+    /* floats and absolute positioning blockify inline boxes */
+    if ((s->float_ != FL_NONE || s->position == POS_ABSOLUTE || s->position == POS_FIXED) &&
+        (s->display == DISP_INLINE || s->display == DISP_INLINE_BLOCK))
+        s->display = DISP_BLOCK;
+    return s;
+}
+
+static bool pseudo_allowed(const Node *n) {
+    static const char *no[] = {"img", "input", "br", "hr", "select", "textarea", "iframe", "video", "audio", "canvas",
+                               "svg", "embed", "object", "html", "head", "meta", "link", "script", "style", "title", NULL};
+    for (int i = 0; no[i]; i++) if (!strcmp(n->tag, no[i])) return false;
+    return true;
+}
+
+static void unlink_node(Node *c) {
+    Node *p = c->parent;
+    if (c->prev) c->prev->next = c->next; else p->first_child = c->next;
+    if (c->next) c->next->prev = c->prev; else p->last_child = c->prev;
+    c->parent = c->prev = c->next = NULL;
+}
+
+/* Creates/updates/removes the generated ::before or ::after node of `el`. */
+static void sync_pseudo(SC *sc, Node *el, const Style *est, int pe) {
+    bool   before = pe == 1;
+    Node  *cur = before ? el->first_child : el->last_child;
+    bool   have = cur && (cur->flags & NODE_PSEUDO) && ((cur->flags & NODE_PSEUDO_BEFORE) != 0) == before;
+    Style *ps = pseudo_allowed(el) && sc->set->dom_arena ? compute_one(sc, el, est, pe) : NULL;
+    if (!ps || !ps->content) {
+        if (have) unlink_node(cur);
+        return;
+    }
+    Arena *dom = sc->set->dom_arena;
+    Node  *pn = cur;
+    if (!have) {
+        pn = dom_new_element(dom, before ? "::before" : "::after");
+        pn->flags = NODE_PSEUDO | (before ? NODE_PSEUDO_BEFORE : 0);
+        if (before) {
+            pn->parent = el;
+            pn->next = el->first_child;
+            if (el->first_child) el->first_child->prev = pn; else el->last_child = pn;
+            el->first_child = pn;
+        } else dom_append(el, pn);
+    }
+    pn->style = ps;
+    const char *txt = ps->content;
+    Node *tn = pn->first_child;
+    if (*txt) {
+        if (!tn) { tn = dom_new_text(dom, txt, strlen(txt)); dom_append(pn, tn); }
+        else if (strcmp(tn->text, txt) != 0) tn->text = arena_strdup(dom, txt);
+        tn->style = ps;
+    } else if (tn) { unlink_node(tn); }
+}
+
 void style_compute_tree(Node *doc, const StyleSet *set, Arena *arena) {
-    SrcList srcs = {0};
-    Apply   ap;
-    memset(&ap, 0, sizeof ap);
-    style_init(&ap.initial);
-    ap.arena = arena;
-    float root_fs = 16;
+    SC sc;
+    memset(&sc, 0, sizeof sc);
+    sc.set = set;
+    sc.arena = arena;
+    sc.root_fs = 16;
+    style_init(&sc.ap.initial);
+    sc.ap.arena = arena;
 
     Node *n = doc->first_child;
     if (!n) return;
     while (n) {
-        if (n->type == NODE_ELEMENT) {
+        if (n->type == NODE_ELEMENT && (n->flags & NODE_PSEUDO)) {
+            /* generated box: style was set by its owner */
+        } else if (n->type == NODE_ELEMENT) {
             const Style *parent = n->parent && n->parent->type == NODE_ELEMENT ? n->parent->style : NULL;
-            srcs.n = 0;
-            for (int si = 0; si < set->nsheets; si++) {
-                const Stylesheet *sh = set->sheets[si];
-                uint64_t          origin = sh->origin == 0 ? 0 : 2;
-                for (int ri = 0; ri < sh->nrules; ri++) {
-                    const Rule *r = &sh->rules[ri];
-                    if (r->media && !media_matches(r->media, &set->vp)) continue;
-                    long spec = css_rule_match(r, n);
-                    if (spec < 0) continue;
-                    srclist_push(&srcs, r->decls, (origin << 56) | ((uint64_t)spec << 32) | (uint64_t)((si << 20) | ri));
-                }
-            }
-            Decl *hints = presentational_hints(arena, n);
-            if (hints) srclist_push(&srcs, hints, (uint64_t)1 << 56);
-            const char *inline_style = dom_attr(n, "style");
-            if (inline_style) {
-                Decl *d = css_parse_decls(arena, inline_style, strlen(inline_style));
-                if (d) srclist_push(&srcs, d, (uint64_t)3 << 56);
-            }
-            qsort(srcs.v, (size_t)srcs.n, sizeof(DeclSrc), cmp_src);
-
-            Style *s = arena_alloc(arena, sizeof *s);
-            style_init(s);
-            if (parent) style_inherit_from(s, parent);
-            ap.st = s;
-            ap.parent = parent;
-            ap.lc.font_size = s->font_size;
-            ap.lc.root_fs = root_fs;
-            ap.lc.vp = set->vp;
-            for (int pass = PASS_CUSTOM; pass <= PASS_REST; pass++) {
-                for (int imp = 0; imp < 2; imp++)
-                    for (int i = 0; i < srcs.n; i++)
-                        for (const Decl *d = srcs.v[i].decls; d; d = d->next)
-                            if ((int)d->important == imp) apply_decl(&ap, d, pass);
-                if (pass == PASS_FONTSIZE) ap.lc.font_size = s->font_size;
-            }
-            if (!n->parent || n->parent->type == NODE_DOCUMENT) root_fs = s->font_size;
-            /* inline/inline-block elements keep display; floats and absolute positioning blockify */
-            if ((s->float_ != FL_NONE || s->position == POS_ABSOLUTE || s->position == POS_FIXED) &&
-                (s->display == DISP_INLINE || s->display == DISP_INLINE_BLOCK))
-                s->display = DISP_BLOCK;
-            n->style = s;
+            n->style = compute_one(&sc, n, parent, 0);
+            sync_pseudo(&sc, n, n->style, 1);
+            sync_pseudo(&sc, n, n->style, 2);
         } else if (n->type == NODE_TEXT && n->parent) {
             n->style = n->parent->style;
         }
@@ -1414,5 +1525,5 @@ void style_compute_tree(Node *doc, const StyleSet *set, Arena *arena) {
         if (!n || n == doc) break;
         n = n->next;
     }
-    free(srcs.v);
+    free(sc.srcs.v);
 }

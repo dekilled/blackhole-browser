@@ -16,6 +16,9 @@ os.makedirs(OUT, exist_ok=True)
 seeds = [open(p, "rb").read() for p in glob.glob("tests/pages/*.html")]
 
 FRAGMENTS = [
+    b"<div style='float:left;width:1e30px;height:1e30px;clear:both'>", b"<div style='float:right;width:99%'>", b"<div style='float:left;display:flex'>",
+    b"<style>p::before{content:'a' attr(x) '\\110000' counter(c)} *::after{content:'\\0'}div::before{display:block;float:left;content:''}</style>",
+    b"<style>a::before,a::after{content:'x';position:absolute}</style>",
     b"<div style='border-radius:1e30px 50% -5px calc(1px/0) / 3px;width:50px;height:50px;border:3px solid red'>",
     b"<div style='background:linear-gradient(1e30deg,red 50%,blue 10%,green -100%,rgba(1,2,3,0.5) 1e9%)'>x</div>",
     b"<div style='background:radial-gradient(circle at 1e9% -1e9%, red, blue);height:30px'>x</div>",
@@ -42,6 +45,10 @@ FRAGMENTS = [
 ]
 
 ADVERSARIAL = {
+    "float_many.html": b"<div>" + b"<i style='float:left;width:10px;height:10px'>x</i>" * 30000 + b"<p>texto</p></div>",
+    "float_nested.html": b"<div style='float:left'>" * 3000 + b"x",
+    "float_clear_mix.html": b"<p>a</p><div style='float:right;width:50%'>f</div><div style='clear:both'>c</div>" * 5000,
+    "pseudo_all.html": b"<style>*::before,*::after{content:'ab';display:block}</style>" + b"<div>" * 2000 + b"x",
     "abs_deep.html": b"<div style='position:absolute;top:1px'>" * 5000 + b"x",
     "abs_many.html": b"<div style='position:relative'>" + b"<i style='position:absolute;right:1px;top:50%'>x</i>" * 40000 + b"</div>",
     "abs_fixed_inline.html": b"<p>" + b"a <b style='position:fixed;width:calc(100%/0)'>b</b> " * 20000,

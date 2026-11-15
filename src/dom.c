@@ -82,7 +82,7 @@ char *dom_text_content(const Node *root) {
     const Node *n = root->first_child;
     while (n) {
         if (n->type == NODE_TEXT) buf_puts(&b, n->text);
-        if (n->first_child) {
+        if (n->first_child && !(n->flags & NODE_PSEUDO)) {
             n = n->first_child;
             continue;
         }

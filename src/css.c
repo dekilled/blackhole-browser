@@ -262,10 +262,21 @@ static bool parse_compound(Cur *c, Compound *out, bool allow_not) {
             s = sub.s;
             any = true;
         } else if (ch == ':') {
-            if (s + 1 < c->end && s[1] == ':') return false; /* pseudo-elements: unsupported */
+            bool dbl = s + 1 < c->end && s[1] == ':';
             Buf b;
             buf_init(&b);
-            size_t k = parse_ident(s + 1, c->end, &b);
+            size_t k = parse_ident(s + 1 + (dbl ? 1 : 0), c->end, &b);
+            if (dbl) { /* pseudo-element: only ::before and ::after are supported */
+                if (!k) { buf_free(&b); return false; }
+                str_lower(b.data);
+                int pe = !strcmp(b.data, "before") ? 1 : !strcmp(b.data, "after") ? 2 : 0;
+                buf_free(&b);
+                if (!pe || !allow_not) return false;
+                out->pseudo_el = (uint8_t)pe;
+                s += 2 + k;
+                any = true;
+                continue;
+            }
             if (!k) { buf_free(&b); return false; }
             s += 1 + k;
             str_lower(b.data);
@@ -304,8 +315,10 @@ static bool parse_compound(Cur *c, Compound *out, bool allow_not) {
                 else if (!strcmp(name, "visited") || !strcmp(name, "active") || !strcmp(name, "focus") ||
                          !strcmp(name, "focus-within") || !strcmp(name, "focus-visible") || !strcmp(name, "target"))
                     out->pseudo |= PC_NEVER;
-                else if (!strcmp(name, "before") || !strcmp(name, "after") || !strcmp(name, "first-line") ||
-                         !strcmp(name, "first-letter"))
+                else if (!strcmp(name, "before") || !strcmp(name, "after")) {
+                    if (allow_not) out->pseudo_el = !strcmp(name, "before") ? 1 : 2;
+                    else ok = false;
+                } else if (!strcmp(name, "first-line") || !strcmp(name, "first-letter"))
                     ok = false;
                 else ok = false;
             } else {
@@ -354,7 +367,7 @@ static uint32_t compound_specificity(const Compound *c) {
     uint32_t a = c->id ? 1 : 0;
     uint32_t b = (uint32_t)c->nclasses + (uint32_t)c->nattrs + (c->has_nth ? 1u : 0u);
     for (uint32_t m = c->pseudo; m; m &= m - 1) b++;
-    uint32_t t = c->tag ? 1 : 0;
+    uint32_t t = (c->tag ? 1 : 0) + (c->pseudo_el ? 1 : 0);
     for (int i = 0; i < c->nnots; i++) {
         uint32_t s = compound_specificity(c->nots[i]);
         a += s >> 16;
@@ -391,7 +404,9 @@ static ComplexSel *parse_complex(const char *s, const char *end, Arena *a) {
         combs[n - 1] = comb;
         c.s = p;
     }
+    for (int i = 0; i + 1 < n; i++) if (parts[i].pseudo_el) return NULL;
     ComplexSel *cs = arena_alloc(a, sizeof *cs);
+    cs->pseudo_el = parts[n - 1].pseudo_el;
     cs->parts = arena_alloc(a, sizeof(Compound) * (size_t)n);
     memcpy(cs->parts, parts, sizeof(Compound) * (size_t)n);
     cs->combs = arena_alloc(a, (size_t)n);
@@ -454,11 +469,11 @@ static bool has_class(const Node *n, const char *cls) {
 }
 
 static const Node *prev_el(const Node *n) {
-    for (n = n->prev; n && n->type != NODE_ELEMENT; n = n->prev) {}
+    for (n = n->prev; n && (n->type != NODE_ELEMENT || (n->flags & NODE_PSEUDO)); n = n->prev) {}
     return n;
 }
 static const Node *next_el(const Node *n) {
-    for (n = n->next; n && n->type != NODE_ELEMENT; n = n->next) {}
+    for (n = n->next; n && (n->type != NODE_ELEMENT || (n->flags & NODE_PSEUDO)); n = n->next) {}
     return n;
 }
 
@@ -568,10 +583,11 @@ static bool match_complex_at(const ComplexSel *s, int i, const Node *n) {
     return false;
 }
 
-long css_rule_match(const Rule *r, const Node *n) {
+long css_rule_match(const Rule *r, const Node *n, int pseudo_el) {
     long best = -1;
     for (int i = 0; i < r->nsels; i++) {
         const ComplexSel *s = r->sels[i];
+        if (s->pseudo_el != pseudo_el) continue;
         if ((long)s->specificity > best && match_complex_at(s, s->n - 1, n)) best = (long)s->specificity;
     }
     return best;

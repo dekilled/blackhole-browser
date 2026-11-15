@@ -34,7 +34,7 @@
     X(JUSTIFY_CONTENT, "justify-content") X(ALIGN_ITEMS, "align-items") X(ALIGN_SELF, "align-self")           \
     X(ALIGN_CONTENT, "align-content") X(FLEX_GROW, "flex-grow") X(FLEX_SHRINK, "flex-shrink")                 \
     X(FLEX_BASIS, "flex-basis") X(FLEX, "flex") X(GAP, "gap") X(ROW_GAP, "row-gap") X(COLUMN_GAP, "column-gap") \
-    X(BORDER_RADIUS, "border-radius") X(BORDER_TOP_LEFT_RADIUS, "border-top-left-radius")                    \
+    X(CONTENT, "content") X(BORDER_RADIUS, "border-radius") X(BORDER_TOP_LEFT_RADIUS, "border-top-left-radius")                    \
     X(BORDER_TOP_RIGHT_RADIUS, "border-top-right-radius") X(BORDER_BOTTOM_RIGHT_RADIUS, "border-bottom-right-radius") \
     X(BORDER_BOTTOM_LEFT_RADIUS, "border-bottom-left-radius") X(BACKGROUND_IMAGE, "background-image")        \
     X(BOX_SHADOW, "box-shadow")                                                                               \
@@ -82,6 +82,7 @@ struct Compound {
     AttrSel     *attrs;
     int          nattrs;
     uint32_t     pseudo;
+    uint8_t      pseudo_el; /* 0 none, 1 ::before, 2 ::after */
     bool         has_nth, nth_of_type, nth_last;
     int          nth_a, nth_b;
     Compound   **nots;
@@ -93,6 +94,7 @@ typedef struct {
     char     *combs; /* combs[i] joins parts[i] and parts[i+1]: ' ' '>' '+' '~' */
     int       n;
     uint32_t  specificity;
+    uint8_t   pseudo_el;
 } ComplexSel;
 
 /* ---- media queries ---- */
@@ -148,6 +150,6 @@ typedef struct {
 } MatchOpts;
 
 /* Returns specificity of the best matching selector of `rule`, or -1 if none matches. */
-long css_rule_match(const Rule *r, const Node *n);
+long css_rule_match(const Rule *r, const Node *n, int pseudo_el);
 
 #endif

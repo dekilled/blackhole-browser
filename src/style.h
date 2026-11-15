@@ -62,6 +62,7 @@ struct Style {
     int     z_index;
     Length  radius[4]; /* top-left, top-right, bottom-right, bottom-left */
     Gradient *grad;
+    const char *content; /* ::before/::after generated text, NULL = no box */
     bool    has_shadow;
     float   sh_x, sh_y, sh_blur, sh_spread;
     uint32_t sh_color;
@@ -87,6 +88,7 @@ typedef struct {
     Stylesheet **sheets;
     int          nsheets;
     Viewport     vp;
+    Arena       *dom_arena; /* where generated pseudo-element nodes live */
 } StyleSet;
 
 /* Returns the built-in user agent stylesheet (parsed once). */
