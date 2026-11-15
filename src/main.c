@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "charset.h"
+#include "diag.h"
 #include "dom.h"
 #include "gfx.h"
 #include "img.h"
@@ -51,6 +52,7 @@ static void usage(const char *prog) {
             "  --click X,Y            simula um clique (implica --chrome); pode repetir\n"
             "  --wheel N              simula rolagem do mouse em N pixels (implica --chrome)\n"
             "  --diagnose             explica por que uma pagina renderiza mal (o que foi ignorado)\n"
+            "  --all                  com --diagnose: lista todos os itens ignorados\n"
             "  --dom                  imprime a arvore DOM e sai\n"
             "  --fetch                imprime o corpo da resposta HTTP e sai\n"
             "  -v                     log detalhado\n",
@@ -105,6 +107,7 @@ int main(int argc, char **argv) {
         } else if (!strcmp(argv[i], "--scroll") && i + 1 < argc) scroll = (float)atof(argv[++i]);
         else if (!strcmp(argv[i], "--dom")) mode_dom = true;
         else if (!strcmp(argv[i], "--diagnose")) mode_diag = true;
+        else if (!strcmp(argv[i], "--all")) diag_show_all = true;
         else if (!strcmp(argv[i], "--fetch")) mode_fetch = true;
         else if (!strcmp(argv[i], "--full")) full = true;
         else if (!strcmp(argv[i], "--chrome")) chrome = true;

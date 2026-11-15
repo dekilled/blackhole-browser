@@ -15,6 +15,7 @@ typedef struct {
     size_t   body_len;
     char    *error;        /* non-NULL when the fetch failed */
     bool     secure;       /* delivered over verified TLS */
+    bool     truncated;    /* connection ended before the body was complete; body is partial */
 } Response;
 
 typedef struct {

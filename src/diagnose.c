@@ -19,6 +19,7 @@ int diagnose_run(const char *url, int W, int H) {
     Page *p = page_load(url, true);
     page_layout(p, (float)W, (float)H);
 
+    bool empty_shell = false;
     int elements = 0, scripts_in = 0, scripts_ext = 0, imgs = 0, iframes = 0, videos = 0, svgs = 0, canvases = 0, custom = 0, forms = 0, links = 0, noscript = 0;
     size_t inline_js = 0, text_chars = 0, noscript_chars = 0;
     char sample[260] = "";
@@ -43,6 +44,14 @@ int diagnose_run(const char *url, int W, int H) {
             else if (!strcmp(t, "a")) links++;
             else if (!strcmp(t, "noscript")) noscript++;
             if (strchr(t, '-')) custom++;
+            const char *id = dom_attr(n, "id");
+            if (id && (!strcmp(id, "root") || !strcmp(id, "app") || !strcmp(id, "__next") || !strcmp(id, "__nuxt") || !strcmp(id, "app-root"))) {
+                char *tc = dom_text_content(n);
+                bool blank = true;
+                for (char *c = tc; *c; c++) if (!is_space((unsigned char)*c)) blank = false;
+                if (blank) empty_shell = true;
+                free(tc);
+            }
         } else if (n->type == NODE_TEXT && !hidden(n)) {
             bool in_script = n->parent && (dom_is(n->parent, "script") || dom_is(n->parent, "style"));
             bool in_noscript = false;
@@ -80,11 +89,15 @@ int diagnose_run(const char *url, int W, int H) {
     printf("amostra do texto . %.200s\n", sample);
 
     printf("\n== VEREDITO\n");
-    bool spa = text_chars < 400 && (scripts_ext + scripts_in) >= 3;
-    if (spa) printf("* Quase sem texto no HTML e %d scripts: a página provavelmente é MONTADA POR JAVASCRIPT (SPA).\n  Sem motor JS ela fica vazia ou quase vazia, não importa quão bom seja o CSS.\n", scripts_ext + scripts_in);
-    if (noscript_chars > text_chars) printf("* Há mais texto dentro de <noscript> do que fora: o site pede JavaScript para funcionar.\n");
-    if (p->status >= 400) printf("* O servidor respondeu %d.\n", p->status);
-    if (!spa && text_chars >= 400) printf("* Há conteúdo no HTML. Se a aparência está errada, o problema é CSS/layout (veja a lista abaixo).\n");
+    int  nscripts = scripts_ext + scripts_in;
+    bool strong = nscripts > 0 && text_chars < 50 && (empty_shell || custom > 0 || text_chars == 0);
+    bool weak = !strong && text_chars < 400 && nscripts >= 3;
+    if (p->status >= 400 || !p->status) printf("* A página não carregou como esperado (HTTP %d). Veja o título/amostra acima.\n", p->status);
+    if (p->truncated) printf("* A conexão caiu antes do fim do HTML: a página foi renderizada com o que chegou.\n");
+    if (strong) printf("* O HTML não tem conteúdo (%zu caracteres) e há %d scripts%s: a página é MONTADA POR JAVASCRIPT.\n  Sem motor JS ela fica vazia, não importa quão bom seja o CSS. (Este é o caso de YouTube, Netflix logada etc.)\n", text_chars, nscripts, empty_shell ? " + um contêiner raiz vazio (#root/#app)" : "");
+    else if (weak) printf("* Pouco texto (%zu caracteres) com %d scripts: ou a página é minimalista (como a home do Google) ou depende de JS.\n  Abra o diagnose.png e compare com o que o site mostra num navegador normal.\n", text_chars, nscripts);
+    if (noscript_chars > text_chars && text_chars < 200) printf("* Há mais texto dentro de <noscript> do que fora: o site pede JavaScript.\n");
+    if (!strong && !weak && text_chars >= 400) printf("* Há conteúdo no HTML. Se a aparência está errada, o problema é CSS/layout (veja a lista abaixo).\n");
     printf("\n== O QUE O MOTOR IGNOROU OU APROXIMOU (ocorrências x nome)");
     diag_report(stdout);
     printf("\n");

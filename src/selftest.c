@@ -149,6 +149,29 @@ static void test_float_and_pseudo(void) {
     page_free(p);
 }
 
+static void test_compat(void) {
+    Page *p = page_from_html("about:test",
+        "<style>#a{display:-webkit-flex}#b{display:-ms-flexbox}#c{display:-webkit-box}#d{display:inline-box}"
+        "#e{margin-inline-start:7px;margin-inline-end:9px;padding-block:3px 5px;inset-inline-start:11px}"
+        "#f{overflow-x:hidden}"
+        "#g:is(.x,.y){color:#010101}#g:where(.x){color:#020202}#h:where(.x){color:#030303}.x{color:#040404}"
+        "#i:is(.q,#i){color:#050505}</style>"
+        "<div id=a></div><div id=b></div><div id=c></div><span id=d></span><div id=e></div><div id=f></div>"
+        "<p id=g class=x></p><p id=h class=x></p><p id=i></p>");
+    page_layout(p, 600, 400);
+    Node *a = find_id(p->doc, "a"), *b = find_id(p->doc, "b"), *c = find_id(p->doc, "c"), *d = find_id(p->doc, "d"), *e = find_id(p->doc, "e");
+    Node *f = find_id(p->doc, "f"), *g = find_id(p->doc, "g"), *h = find_id(p->doc, "h"), *i = find_id(p->doc, "i");
+    CHECK(a->style->display == DISP_FLEX && b->style->display == DISP_FLEX);
+    CHECK(c->style->display == DISP_BLOCK && d->style->display == DISP_INLINE_FLEX);
+    CHECK(e->style->margin[3].px == 7 && e->style->margin[1].px == 9 && e->style->padding[0].px == 3 && e->style->padding[2].px == 5);
+    CHECK(!e->style->offset[3].is_auto && e->style->offset[3].px == 11);
+    CHECK(f->style->overflow == OV_HIDDEN);
+    CHECK(g->style->color == 0xFF010101u); /* :is(.x) has class specificity and beats the plain .x rule */
+    CHECK(h->style->color == 0xFF030303u); /* #h (id) outranks .x; :where(.x) only adds a condition, no specificity */
+    CHECK(i->style->color == 0xFF050505u); /* #i:is(.q,#i) matches through its second alternative */
+    page_free(p);
+}
+
 static void test_parser_robustness(void) {
     Arena a = {0};
     Node *d = html_parse(&a, "<p>um<p>dois<ul><li>a<li>b</ul><table><td>x</table><b><i>mal</b></i>", 0);
@@ -170,6 +193,7 @@ int selftest_run(void) {
     test_cascade();
     test_layout();
     test_float_and_pseudo();
+    test_compat();
     test_parser_robustness();
     printf("selftest: %d verificacoes, %d falhas\n", g_total, g_fail);
     return g_fail ? 1 : 0;

@@ -16,6 +16,8 @@ os.makedirs(OUT, exist_ok=True)
 seeds = [open(p, "rb").read() for p in glob.glob("tests/pages/*.html")]
 
 FRAGMENTS = [
+    b"<style>:is(:is(:is(a,b),c),d),:where(,),:is(),:where(:is(" * 50 + b"a" + b")" * 50 + b"{x:y}</style>", b"<style>:is(a,b,c,d,e,f,g,h,i,j,k){color:red}div:is(.a,.b):where(.c){x:y}</style>",
+    b"<div style='margin-inline:1e30px;padding-block:calc(1px/0) 5px;overflow-x:scroll;inset-inline-start:auto;display:-webkit-flex'>",
     b"<div style='float:left;width:1e30px;height:1e30px;clear:both'>", b"<div style='float:right;width:99%'>", b"<div style='float:left;display:flex'>",
     b"<style>p::before{content:'a' attr(x) '\\110000' counter(c)} *::after{content:'\\0'}div::before{display:block;float:left;content:''}</style>",
     b"<style>a::before,a::after{content:'x';position:absolute}</style>",

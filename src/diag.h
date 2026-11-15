@@ -6,6 +6,7 @@
 #include <stdio.h>
 
 extern bool diag_on;
+extern bool diag_show_all; /* print every entry instead of the top N per category */
 void        diag_note(const char *category, const char *name);
 void        diag_report(FILE *f);
 

@@ -7,6 +7,7 @@
 #include "util.h"
 
 bool diag_on;
+bool diag_show_all;
 
 #define MAX_ENTRIES 600
 
@@ -47,11 +48,18 @@ static int cmp(const void *a, const void *b) {
 void diag_report(FILE *f) {
     qsort(g_e, (size_t)g_n, sizeof(Entry), cmp);
     const char *last = "";
-    for (int i = 0; i < g_n; i++) {
-        if (strcmp(last, g_e[i].cat)) {
+    int         shown = 0, hidden_n = 0, hidden_occ = 0;
+    for (int i = 0; i <= g_n; i++) {
+        bool new_cat = i == g_n || strcmp(last, g_e[i].cat);
+        if (new_cat) {
+            if (hidden_n) fprintf(f, "         ... e mais %d itens (%d ocorrências). Use --all para ver tudo.\n", hidden_n, hidden_occ);
+            shown = hidden_n = hidden_occ = 0;
+            if (i == g_n) break;
             fprintf(f, "\n[%s]\n", g_e[i].cat);
             last = g_e[i].cat;
         }
+        if (!diag_show_all && shown >= 25) { hidden_n++; hidden_occ += g_e[i].n; continue; }
         fprintf(f, "  %5dx  %s\n", g_e[i].n, g_e[i].name);
+        shown++;
     }
 }

@@ -204,6 +204,8 @@ Page *page_load(const char *url, bool user_initiated) {
     p->status = r.status;
     p->secure = r.secure;
     p->html_bytes = r.body_len;
+    p->truncated = r.truncated;
+    if (r.truncated) diag_note("rede", "corpo da resposta truncado (a conexão caiu antes do fim)");
     p->allow_file_subresources = user_initiated && !strncmp(p->url, "file:", 5);
 
     const char *ct = r.content_type ? r.content_type : "text/html";

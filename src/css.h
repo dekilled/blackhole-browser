@@ -38,6 +38,15 @@
     X(BORDER_TOP_RIGHT_RADIUS, "border-top-right-radius") X(BORDER_BOTTOM_RIGHT_RADIUS, "border-bottom-right-radius") \
     X(BORDER_BOTTOM_LEFT_RADIUS, "border-bottom-left-radius") X(BACKGROUND_IMAGE, "background-image")        \
     X(BOX_SHADOW, "box-shadow")                                                                               \
+    X(OVERFLOW_X, "overflow-x") X(OVERFLOW_Y, "overflow-y")                                                   \
+    X(MARGIN_INLINE_START, "margin-inline-start") X(MARGIN_INLINE_END, "margin-inline-end")                   \
+    X(MARGIN_BLOCK_START, "margin-block-start") X(MARGIN_BLOCK_END, "margin-block-end")                       \
+    X(MARGIN_INLINE, "margin-inline") X(MARGIN_BLOCK, "margin-block")                                         \
+    X(PADDING_INLINE_START, "padding-inline-start") X(PADDING_INLINE_END, "padding-inline-end")               \
+    X(PADDING_BLOCK_START, "padding-block-start") X(PADDING_BLOCK_END, "padding-block-end")                   \
+    X(PADDING_INLINE, "padding-inline") X(PADDING_BLOCK, "padding-block")                                     \
+    X(INSET_INLINE_START, "inset-inline-start") X(INSET_INLINE_END, "inset-inline-end")                       \
+    X(INSET_BLOCK_START, "inset-block-start") X(INSET_BLOCK_END, "inset-block-end")                           \
     X(TOP, "top") X(RIGHT, "right") X(BOTTOM, "bottom") X(LEFT, "left") X(INSET, "inset") X(Z_INDEX, "z-index")
 
 typedef enum {
@@ -87,6 +96,9 @@ struct Compound {
     int          nth_a, nth_b;
     Compound   **nots;
     int          nnots;
+    Compound   **anys; /* :is() / :where() alternatives */
+    int          nany;
+    bool         any_zero;
 };
 
 typedef struct {

@@ -188,13 +188,23 @@ static bool conn_open(Conn *c, const char *host, int port, bool tls, int timeout
     return true;
 }
 
+static __thread char g_ioerr[160];
+
 static ssize_t conn_read(Conn *c, void *buf, size_t n) {
     if (c->ssl) {
         int k = SSL_read(c->ssl, buf, (int)(n > 1 << 20 ? 1 << 20 : n));
         if (k > 0) return k;
         int e = SSL_get_error(c->ssl, k);
-        if (e == SSL_ERROR_ZERO_RETURN) return 0;
-        if (e == SSL_ERROR_SYSCALL && k == 0) return 0; /* peer closed without close_notify */
+        if (e == SSL_ERROR_ZERO_RETURN) { snprintf(g_ioerr, sizeof g_ioerr, "o servidor encerrou a conexão (close_notify)"); return 0; }
+        if (e == SSL_ERROR_SYSCALL && k == 0) { /* peer closed without close_notify */
+            snprintf(g_ioerr, sizeof g_ioerr, "o servidor fechou a conexão sem close_notify");
+            return 0;
+        }
+        {
+            unsigned long ee = ERR_peek_last_error();
+            if (ee) ERR_error_string_n(ee, g_ioerr, sizeof g_ioerr);
+            else snprintf(g_ioerr, sizeof g_ioerr, "erro de leitura TLS (%d)", e);
+        }
         ERR_clear_error();
         errno = (e == SSL_ERROR_WANT_READ || e == SSL_ERROR_WANT_WRITE || errno == EAGAIN) ? EAGAIN : EIO;
         return -1;
@@ -202,6 +212,8 @@ static ssize_t conn_read(Conn *c, void *buf, size_t n) {
     ssize_t k;
     do k = read(c->fd, buf, n);
     while (k < 0 && errno == EINTR);
+    if (k == 0) snprintf(g_ioerr, sizeof g_ioerr, "o servidor fechou a conexão");
+    else if (k < 0) snprintf(g_ioerr, sizeof g_ioerr, "erro de leitura: %s", strerror(errno));
     return k;
 }
 
@@ -311,7 +323,7 @@ static const char *headers_get(const Headers *h, const char *name) {
 }
 
 /* ------------------------------------------------------------- decompression */
-static bool inflate_body(const Buf *in, Buf *out, size_t cap, bool raw) {
+static bool inflate_body(const Buf *in, Buf *out, size_t cap, bool raw, bool partial_ok) {
     z_stream zs;
     memset(&zs, 0, sizeof zs);
     if (inflateInit2(&zs, raw ? -15 : 15 + 32) != Z_OK) return false;
@@ -325,7 +337,7 @@ static bool inflate_body(const Buf *in, Buf *out, size_t cap, bool raw) {
         rc = inflate(&zs, Z_NO_FLUSH);
         if (rc != Z_OK && rc != Z_STREAM_END) {
             inflateEnd(&zs);
-            return false;
+            return partial_ok && out->len > 0; /* truncated stream: keep what was decoded */
         }
         size_t produced = sizeof chunk - zs.avail_out;
         if (out->len + produced > cap) { /* decompression bomb */
@@ -335,7 +347,7 @@ static bool inflate_body(const Buf *in, Buf *out, size_t cap, bool raw) {
         buf_append(out, chunk, produced);
     } while (rc != Z_STREAM_END && (zs.avail_in > 0 || zs.avail_out == 0));
     inflateEnd(&zs);
-    return rc == Z_STREAM_END;
+    return rc == Z_STREAM_END || (partial_ok && out->len > 0);
 }
 
 /* ------------------------------------------------------------------- misc -- */
@@ -550,6 +562,16 @@ static bool http_exchange(const Url *u, const FetchOpts *o, Response *r, char **
         headers_add(&h, line.data, (size_t)(colon - line.data), v);
     }
 
+    if (bh_verbose) {
+        const char *hv[] = {"transfer-encoding", "content-encoding", "content-length", "content-type", "server", "location", "connection"};
+        char tmp[600] = "";
+        for (size_t i = 0; i < sizeof hv / sizeof *hv; i++) {
+            const char *v = headers_get(&h, hv[i]);
+            if (v) { size_t l = strlen(tmp); snprintf(tmp + l, sizeof tmp - l, " %s=[%.80s]", hv[i], v); }
+        }
+        bh_log("HTTP %d%s", r->status, tmp);
+    }
+
     /* redirect? */
     if (r->status == 301 || r->status == 302 || r->status == 303 || r->status == 307 || r->status == 308) {
         const char *loc = headers_get(&h, "location");
@@ -569,7 +591,8 @@ static bool http_exchange(const Url *u, const FetchOpts *o, Response *r, char **
         if (te && strcasestr(te, "chunked")) {
             for (;;) {
                 if (!rd_line(rd, &line, 1024)) {
-                    set_err(r, "truncated chunked body");
+                    if (raw.len) { r->truncated = true; break; } /* keep the partial page, like real browsers */
+                    set_err(r, "o servidor não enviou o corpo da resposta (%s)", rd->timed_out ? "tempo esgotado" : g_ioerr);
                     goto out;
                 }
                 char *endp;
@@ -585,12 +608,12 @@ static bool http_exchange(const Url *u, const FetchOpts *o, Response *r, char **
                     goto out;
                 }
                 if (rd_bytes(rd, &raw, sz) != sz) {
-                    set_err(r, "truncated chunk");
-                    goto out;
+                    r->truncated = true;
+                    break;
                 }
                 if (!rd_line(rd, &line, 16)) { /* CRLF after chunk */
-                    set_err(r, "bad chunk terminator");
-                    goto out;
+                    r->truncated = true;
+                    break;
                 }
             }
             /* trailers ignored */
@@ -603,8 +626,11 @@ static bool http_exchange(const Url *u, const FetchOpts *o, Response *r, char **
                 goto out;
             }
             if (rd_bytes(rd, &raw, (size_t)n) != n) {
-                set_err(r, rd->timed_out ? "timed out reading body" : "body truncated");
-                goto out;
+                if (!raw.len) {
+                    set_err(r, "o servidor não enviou o corpo da resposta (%s)", rd->timed_out ? "tempo esgotado" : g_ioerr);
+                    goto out;
+                }
+                r->truncated = true;
             }
         } else {
             while (rd_fill(rd)) {
@@ -623,10 +649,10 @@ static bool http_exchange(const Url *u, const FetchOpts *o, Response *r, char **
     if (ce && (strcasestr(ce, "gzip") || strcasestr(ce, "deflate")) && raw.len) {
         Buf dec;
         buf_init(&dec);
-        bool good = inflate_body(&raw, &dec, o->max_body, false);
+        bool good = inflate_body(&raw, &dec, o->max_body, false, r->truncated);
         if (!good) {
             buf_clear(&dec);
-            good = inflate_body(&raw, &dec, o->max_body, true);
+            good = inflate_body(&raw, &dec, o->max_body, true, r->truncated);
         }
         if (!good) {
             buf_free(&dec);

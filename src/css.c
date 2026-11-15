@@ -220,6 +220,9 @@ static bool parse_compound(Cur *c, Compound *out, bool allow_not) {
     int         nat = 0;
     Compound   *nots[4];
     int         nnot = 0;
+    Compound   *anys[8];
+    int         nany = 0;
+    bool        any_zero = false;
     bool        any = false;
     const char *s = c->s;
 
@@ -328,6 +331,30 @@ static bool parse_compound(Cur *c, Compound *out, bool allow_not) {
                     out->nth_of_type = strstr(name, "of-type") != NULL;
                     out->nth_last = strstr(name, "last") != NULL;
                     ok = parse_nth(arg, arglen, &out->nth_a, &out->nth_b);
+                } else if ((!strcmp(name, "is") || !strcmp(name, "where") || !strcmp(name, "matches") || !strcmp(name, "-webkit-any") ||
+                            !strcmp(name, "-moz-any")) && allow_not && nany == 0) {
+                    /* comma separated list of compound selectors */
+                    ok = true;
+                    const char *seg = arg, *argend = arg + arglen;
+                    int         paren = 0;
+                    for (const char *q = arg;; q++) {
+                        bool at_end = q >= argend;
+                        if (!at_end) {
+                            if (*q == '(' || *q == '[') paren++;
+                            else if ((*q == ')' || *q == ']') && paren > 0) paren--;
+                        }
+                        if (at_end || (*q == ',' && paren == 0)) {
+                            Cur sub = {seg, q, c->a};
+                            sub.s = skip_ws(sub.s, sub.end);
+                            Compound *nc = arena_alloc(c->a, sizeof *nc);
+                            if (nany >= 8 || !parse_compound(&sub, nc, false) || skip_ws(sub.s, sub.end) != sub.end) { ok = false; break; }
+                            anys[nany++] = nc;
+                            seg = q + 1;
+                            if (at_end) break;
+                        }
+                    }
+                    any_zero = !strcmp(name, "where");
+                    if (!ok) nany = 0;
                 } else if (!strcmp(name, "not") && allow_not && nnot < 4) {
                     Cur   sub = {arg, arg + arglen, c->a};
                     sub.s = skip_ws(sub.s, sub.end);
@@ -355,6 +382,12 @@ static bool parse_compound(Cur *c, Compound *out, bool allow_not) {
         memcpy(out->attrs, attrs, sizeof(AttrSel) * (size_t)nat);
         out->nattrs = nat;
     }
+    if (nany) {
+        out->anys = arena_alloc(c->a, sizeof(Compound *) * (size_t)nany);
+        memcpy(out->anys, anys, sizeof(Compound *) * (size_t)nany);
+        out->nany = nany;
+        out->any_zero = any_zero;
+    }
     if (nnot) {
         out->nots = arena_alloc(c->a, sizeof(Compound *) * (size_t)nnot);
         memcpy(out->nots, nots, sizeof(Compound *) * (size_t)nnot);
@@ -373,6 +406,13 @@ static uint32_t compound_specificity(const Compound *c) {
         a += s >> 16;
         b += (s >> 8) & 255;
         t += s & 255;
+    }
+    if (c->nany && !c->any_zero) { /* :is() takes the specificity of its most specific argument */
+        uint32_t best = 0;
+        for (int i = 0; i < c->nany; i++) { uint32_t sp = compound_specificity(c->anys[i]); if (sp > best) best = sp; }
+        a += best >> 16;
+        b += (best >> 8) & 255;
+        t += best & 255;
     }
     return (a << 16) | ((b > 255 ? 255 : b) << 8) | (t > 255 ? 255 : t);
 }
@@ -553,6 +593,11 @@ static bool match_compound(const Compound *c, const Node *n) {
                 if (!c->nth_of_type || !strcmp(s->tag, n->tag)) idx++;
         }
         if (!nth_ok(c->nth_a, c->nth_b, idx)) return false;
+    }
+    if (c->nany) {
+        bool any = false;
+        for (int i = 0; i < c->nany && !any; i++) any = match_compound(c->anys[i], n);
+        if (!any) return false;
     }
     for (int i = 0; i < c->nnots; i++)
         if (match_compound(c->nots[i], n)) return false;
@@ -911,7 +956,14 @@ static void parse_rules(Stylesheet *sh, const char *s, const char *end, MediaCon
             size_t n = (size_t)(pe - s) < sizeof tmp - 1 ? (size_t)(pe - s) : sizeof tmp - 1;
             memcpy(tmp, s, n);
             tmp[n] = 0;
-            diag_note("css-seletor-descartado", str_trim(tmp));
+            char *t = str_trim(tmp);
+            if (strstr(t, "::-webkit-") || strstr(t, "::-moz-") || strstr(t, ":-moz-") || strstr(t, ":-ms-") || strstr(t, "::-ms-") ||
+                strstr(t, ":-o-") || strstr(t, "::placeholder") || strstr(t, "::view-transition") || strstr(t, "::selection") || strstr(t, "::marker") ||
+                strstr(t, "::backdrop") || strstr(t, ":popover-open") || strstr(t, "::file-selector"))
+                diag_note("css-seletor-descartado", "(pseudo-elementos de navegador: ::-webkit-*, ::placeholder, ::selection... sem prejuizo visual)");
+            else if (strstr(t, ":has("))
+                diag_note("css-seletor-descartado", "(seletores com :has() - nao suportado)");
+            else diag_note("css-seletor-descartado", t);
         }
         if (sels && nsels > 0) {
             Decl *d = parse_decls_range(&sh->arena, block, inner_end);

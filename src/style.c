@@ -821,6 +821,42 @@ static void apply_decl(Apply *ap, const Decl *d, int pass) {
     if (n == 0) { free(buf); return; }
     char *w0 = words[0];
 
+    /* logical properties (left-to-right, horizontal writing mode) map onto physical ones */
+    {
+        PropId left = PROP_UNKNOWN, right = PROP_UNKNOWN;
+        switch (id) {
+        case PROP_MARGIN_INLINE_START: id = PROP_MARGIN_LEFT; break;
+        case PROP_MARGIN_INLINE_END: id = PROP_MARGIN_RIGHT; break;
+        case PROP_MARGIN_BLOCK_START: id = PROP_MARGIN_TOP; break;
+        case PROP_MARGIN_BLOCK_END: id = PROP_MARGIN_BOTTOM; break;
+        case PROP_PADDING_INLINE_START: id = PROP_PADDING_LEFT; break;
+        case PROP_PADDING_INLINE_END: id = PROP_PADDING_RIGHT; break;
+        case PROP_PADDING_BLOCK_START: id = PROP_PADDING_TOP; break;
+        case PROP_PADDING_BLOCK_END: id = PROP_PADDING_BOTTOM; break;
+        case PROP_INSET_INLINE_START: id = PROP_LEFT; break;
+        case PROP_INSET_INLINE_END: id = PROP_RIGHT; break;
+        case PROP_INSET_BLOCK_START: id = PROP_TOP; break;
+        case PROP_INSET_BLOCK_END: id = PROP_BOTTOM; break;
+        case PROP_MARGIN_INLINE: left = PROP_MARGIN_LEFT; right = PROP_MARGIN_RIGHT; break;
+        case PROP_MARGIN_BLOCK: left = PROP_MARGIN_TOP; right = PROP_MARGIN_BOTTOM; break;
+        case PROP_PADDING_INLINE: left = PROP_PADDING_LEFT; right = PROP_PADDING_RIGHT; break;
+        case PROP_PADDING_BLOCK: left = PROP_PADDING_TOP; right = PROP_PADDING_BOTTOM; break;
+        default: break;
+        }
+        if (left != PROP_UNKNOWN) {
+            Decl a = {left, NULL, words[0], false, NULL}, b2 = {right, NULL, n > 1 ? words[1] : words[0], false, NULL};
+            apply_decl(ap, &a, pass);
+            apply_decl(ap, &b2, pass);
+            free(buf);
+            return;
+        }
+        if (id == PROP_OVERFLOW_X || id == PROP_OVERFLOW_Y) { /* one clipping flag for both axes */
+            if (!streq(w0, "visible")) s->overflow = streq(w0, "scroll") ? OV_SCROLL : streq(w0, "auto") ? OV_AUTO : OV_HIDDEN;
+            free(buf);
+            return;
+        }
+    }
+
     /* css-wide keywords */
     if (n == 1 && (streq(w0, "inherit") || streq(w0, "initial") || streq(w0, "unset") || streq(w0, "revert"))) {
         bool inheritable = id == PROP_COLOR || id == PROP_FONT_SIZE || id == PROP_FONT_WEIGHT || id == PROP_FONT_STYLE ||
@@ -849,7 +885,9 @@ static void apply_decl(Apply *ap, const Decl *d, int pass) {
             {"table-header-group", DISP_TABLE_ROW_GROUP}, {"table-footer-group", DISP_TABLE_ROW_GROUP},
             {"table-caption", DISP_TABLE_CAPTION}, {"flex", DISP_FLEX}, {"inline-flex", DISP_INLINE_FLEX},
             {"grid", DISP_BLOCK}, {"inline-grid", DISP_INLINE_BLOCK}, {"contents", DISP_CONTENTS},
-            {"flow-root", DISP_BLOCK}, {"table-column", DISP_NONE}, {"table-column-group", DISP_NONE},
+            {"flow-root", DISP_BLOCK}, {"-webkit-flex", DISP_FLEX}, {"-ms-flexbox", DISP_FLEX}, {"-ms-flex", DISP_FLEX},
+            {"-webkit-inline-flex", DISP_INLINE_FLEX}, {"-ms-inline-flexbox", DISP_INLINE_FLEX}, {"inline-box", DISP_INLINE_FLEX},
+            {"-webkit-inline-box", DISP_INLINE_FLEX}, {"-moz-inline-box", DISP_INLINE_FLEX}, {"-webkit-box", DISP_BLOCK}, {"-moz-box", DISP_BLOCK}, {"table-column", DISP_NONE}, {"table-column-group", DISP_NONE},
         };
         bool found = false;
         for (size_t i = 0; i < sizeof m / sizeof *m; i++)

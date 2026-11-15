@@ -31,6 +31,7 @@ typedef struct Page {
     bool         allow_file_subresources;
     char        *base; /* base URL for relative references */
     size_t       html_bytes;
+    bool         truncated;
 } Page;
 
 /* Loads and parses a URL. Never returns NULL: on failure returns an error page. */
