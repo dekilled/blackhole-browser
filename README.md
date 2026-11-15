@@ -7,7 +7,7 @@ O objetivo: acessar a Internet, rodar serviços de streaming, ser **seguro** e *
 O caminho é longo — este repositório documenta honestamente até onde a gente chegou.
 Veja [`docs/ROADMAP.md`](docs/ROADMAP.md) e [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-![BlackHole renderizando uma página](docs/img/hello.png)
+![Nova aba estilo LUMNA, renderizada pelo próprio motor](docs/img/newtab.png)
 
 ## O que existe hoje (v0.1)
 
@@ -16,6 +16,8 @@ Veja [`docs/ROADMAP.md`](docs/ROADMAP.md) e [`docs/ARCHITECTURE.md`](docs/ARCHIT
 - Parser HTML tolerante a erros (tokenizer + tree builder, entidades, charsets)
 - CSS: seletores, especificidade, cascata, herança, `@media`, `var()`, `calc()`
 - Layout: blocos, inline/line-breaking, margin collapsing, tabelas, inline-block
+- Interface com **abas**, barra de endereço em pílula e página de nova aba (renderizada pelo próprio motor)
+- `border-radius`, `linear/radial-gradient`, `box-shadow`
 - Flexbox, `position` (relative/absolute/fixed), tabelas, inline-block, controles de formulário
 - Imagens: decodificadores **PNG, JPEG (baseline + progressivo) e GIF escritos do zero**
 - Renderizador de software próprio (canvas, texto via FreeType) e janela X11

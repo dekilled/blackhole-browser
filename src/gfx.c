@@ -110,6 +110,86 @@ void canvas_fill_ellipse(Canvas *c, float cx, float cy, float rx, float ry, uint
         }
 }
 
+void canvas_blend_px(Canvas *c, int x, int y, uint32_t argb) {
+    if (x < c->cx0 || x >= c->cx1 || y < c->cy0 || y >= c->cy1) return;
+    uint32_t a = argb >> 24;
+    uint32_t *d = &c->px[(size_t)y * (size_t)c->w + (size_t)x];
+    if (a == 255) *d = argb;
+    else if (a) *d = blend(*d, argb, a);
+}
+
+/* Signed-distance coverage of a rounded rectangle at pixel centre (px,py). */
+float canvas_rrect_coverage(float px, float py, float x, float y, float w, float h, const float r[4]) {
+    float hw = w / 2, hh = h / 2, cx = x + hw, cy = y + hh;
+    float rr = (px < cx) ? ((py < cy) ? r[0] : r[3]) : ((py < cy) ? r[1] : r[2]);
+    if (rr > hw) rr = hw;
+    if (rr > hh) rr = hh;
+    float qx = fabsf(px - cx) - (hw - rr), qy = fabsf(py - cy) - (hh - rr);
+    float ox = qx > 0 ? qx : 0, oy = qy > 0 ? qy : 0;
+    float inner = qx > qy ? qx : qy;
+    float d = sqrtf(ox * ox + oy * oy) + (inner < 0 ? inner : 0) - rr;
+    float cov = 0.5f - d;
+    return cov < 0 ? 0 : cov > 1 ? 1 : cov;
+}
+
+static float max4(const float r[4]) {
+    float m = r[0];
+    for (int i = 1; i < 4; i++) if (r[i] > m) m = r[i];
+    return m;
+}
+
+void canvas_fill_rrect(Canvas *c, float fx, float fy, float fw, float fh, const float r[4], uint32_t argb) {
+    uint32_t a0 = argb >> 24;
+    if (!a0 || fw <= 0 || fh <= 0) return;
+    float R = max4(r);
+    if (R <= 0.5f) { canvas_fill_rect(c, fx, fy, fw, fh, argb); return; }
+    int x0 = (int)floorf(fx + 0.5f), y0 = (int)floorf(fy + 0.5f), x1 = (int)floorf(fx + fw + 0.5f), y1 = (int)floorf(fy + fh + 0.5f);
+    float x = (float)x0, y = (float)y0, w = (float)(x1 - x0), h = (float)(y1 - y0);
+    if (w <= 0 || h <= 0) return;
+    int band = (int)ceilf(R) + 1;
+    int top_end = y0 + band;
+    if (top_end > y1) top_end = y1;
+    int bot_start = y1 - band;
+    if (bot_start < top_end) bot_start = top_end;
+    if (bot_start > top_end) canvas_fill_rect(c, x, (float)top_end, w, (float)(bot_start - top_end), argb);
+    for (int pass = 0; pass < 2; pass++) {
+        int ra = pass == 0 ? y0 : bot_start, rb = pass == 0 ? top_end : y1;
+        for (int yy = ra; yy < rb; yy++) {
+            if (yy < c->cy0 || yy >= c->cy1) continue;
+            for (int xx = x0; xx < x1; xx++) {
+                if (xx < c->cx0 || xx >= c->cx1) continue;
+                float cov = canvas_rrect_coverage((float)xx + 0.5f, (float)yy + 0.5f, x, y, w, h, r);
+                if (cov <= 0) continue;
+                canvas_blend_px(c, xx, yy, ((uint32_t)((float)a0 * cov) << 24) | (argb & 0xFFFFFF));
+            }
+        }
+    }
+}
+
+void canvas_stroke_rrect(Canvas *c, float fx, float fy, float fw, float fh, const float r[4], float t, uint32_t argb) {
+    uint32_t a0 = argb >> 24;
+    if (!a0 || fw <= 0 || fh <= 0 || t <= 0) return;
+    int x0 = (int)floorf(fx + 0.5f), y0 = (int)floorf(fy + 0.5f), x1 = (int)floorf(fx + fw + 0.5f), y1 = (int)floorf(fy + fh + 0.5f);
+    float x = (float)x0, y = (float)y0, w = (float)(x1 - x0), h = (float)(y1 - y0);
+    float ir[4];
+    for (int i = 0; i < 4; i++) ir[i] = r[i] > t ? r[i] - t : 0;
+    int band = (int)ceilf(max4(r) + t) + 1;
+    for (int yy = y0; yy < y1; yy++) {
+        if (yy < c->cy0 || yy >= c->cy1) continue;
+        bool edge_row = yy < y0 + band || yy >= y1 - band;
+        for (int xx = x0; xx < x1; xx++) {
+            if (!edge_row && xx >= x0 + (int)ceilf(t) + 1 && xx < x1 - (int)ceilf(t) - 1) { xx = x1 - (int)ceilf(t) - 2; continue; }
+            if (xx < c->cx0 || xx >= c->cx1) continue;
+            float px = (float)xx + 0.5f, py = (float)yy + 0.5f;
+            float co = canvas_rrect_coverage(px, py, x, y, w, h, r);
+            float ci = canvas_rrect_coverage(px, py, x + t, y + t, w - 2 * t, h - 2 * t, ir);
+            float cov = co - ci;
+            if (cov <= 0) continue;
+            canvas_blend_px(c, xx, yy, ((uint32_t)((float)a0 * cov) << 24) | (argb & 0xFFFFFF));
+        }
+    }
+}
+
 void canvas_hline(Canvas *c, int x, int y, int w, uint32_t argb) { canvas_fill_rect(c, (float)x, (float)y, (float)w, 1, argb); }
 
 void canvas_blit_argb(Canvas *c, int x, int y, int w, int h, const uint32_t *src, int stride) {
@@ -128,7 +208,7 @@ void canvas_blit_argb(Canvas *c, int x, int y, int w, int h, const uint32_t *src
     }
 }
 
-void canvas_draw_image(Canvas *c, float dx, float dy, float dw, float dh, const uint32_t *src, int sw, int sh) {
+void canvas_draw_image_r(Canvas *c, float dx, float dy, float dw, float dh, const uint32_t *src, int sw, int sh, const float rad[4]) {
     if (dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0) return;
     int x0 = (int)floorf(dx + 0.5f), y0 = (int)floorf(dy + 0.5f);
     int x1 = (int)floorf(dx + dw + 0.5f), y1 = (int)floorf(dy + dh + 0.5f);
@@ -166,11 +246,19 @@ void canvas_draw_image(Canvas *c, float dx, float dy, float dw, float dh, const 
                 s = (uint32_t)(A / cnt) << 24 | (uint32_t)(R / A) << 16 | (uint32_t)(G / A) << 8 | (uint32_t)(B / A);
             }
             uint32_t a = s >> 24;
+            if (rad) {
+                float cov = canvas_rrect_coverage((float)x + 0.5f, (float)y + 0.5f, dx, dy, dw, dh, rad);
+                a = (uint32_t)((float)a * cov);
+            }
             uint32_t *d = &c->px[(size_t)y * (size_t)c->w + (size_t)x];
             if (a == 255) *d = s;
             else if (a) *d = blend(*d, s, a);
         }
     }
+}
+
+void canvas_draw_image(Canvas *c, float dx, float dy, float dw, float dh, const uint32_t *src, int sw, int sh) {
+    canvas_draw_image_r(c, dx, dy, dw, dh, src, sw, sh, NULL);
 }
 
 /* ------------------------------------------------------------------- PNG --- */

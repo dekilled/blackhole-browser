@@ -165,9 +165,9 @@ int main(int argc, char **argv) {
     }
     if (chrome) { /* headless run of the whole browser UI */
         Browser *b = browser_new(W, H);
-        browser_navigate(b, url, true, true);
+        browser_navigate(b, strcmp(url, "about:blank") ? url : "about:newtab", true, true);
         for (int step = 0; step <= nclicks; step++) {
-            while (b->loading) {
+            while (browser_busy(b)) {
                 struct pollfd pf = {b->notify_fd[0], POLLIN, 0};
                 if (poll(&pf, 1, 30000) <= 0) break;
                 browser_loader_ready(b);
@@ -180,7 +180,7 @@ int main(int argc, char **argv) {
         if (wheel != 0) browser_wheel(b, 0, 0, wheel);
         browser_render(b);
         bool ok = canvas_write_png(b->canvas, shot);
-        fprintf(stderr, "%s: %s (%dx%d) url=%s addr=%s\n", ok ? "ok" : "ERRO", shot, W, H, b->page ? b->page->url : "-", b->addr);
+        fprintf(stderr, "%s: %s (%dx%d) url=%s addr=%s\n", ok ? "ok" : "ERRO", shot, W, H, browser_page(b) ? browser_page(b)->url : "-", b->addr);
         browser_free(b);
         free(owned);
         return ok ? 0 : 1;

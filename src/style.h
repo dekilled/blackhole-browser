@@ -36,6 +36,15 @@ typedef struct CustomProp {
     struct CustomProp *next;
 } CustomProp;
 
+typedef struct Gradient {
+    bool     radial;
+    float    angle;    /* degrees, CSS convention (0 = to top) */
+    float    cx, cy;   /* radial centre as fractions of the box */
+    int      n;
+    uint32_t col[8];
+    float    pos[8];
+} Gradient;
+
 struct Style {
     uint8_t display, text_align, white_space, text_transform, font_family, list_style, vertical_align;
     uint8_t visibility_hidden, float_, clear, position, overflow, box_sizing_border;
@@ -51,6 +60,11 @@ struct Style {
     Length  flex_basis;
     Length  offset[4]; /* top right bottom left (position offsets), auto by default */
     int     z_index;
+    Length  radius[4]; /* top-left, top-right, bottom-right, bottom-left */
+    Gradient *grad;
+    bool    has_shadow;
+    float   sh_x, sh_y, sh_blur, sh_spread;
+    uint32_t sh_color;
     uint32_t color, bg;
     Length   width, height, min_width, max_width, min_height, max_height;
     Length   margin[4], padding[4]; /* top right bottom left */

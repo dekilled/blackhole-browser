@@ -46,6 +46,89 @@ static void marker_text(const Box *b, char *out, size_t cap) {
 
 static uint32_t side_color(const Style *st, int i) { return (st->border_color_cur >> i) & 1 ? st->color : st->border_color[i]; }
 
+
+static void resolve_radii(const Style *st, float w, float h, float out[4]) {
+    float base = w < h ? w : h;
+    for (int i = 0; i < 4; i++) {
+        float v = st->radius[i].px + st->radius[i].pct * base;
+        out[i] = v < 0 ? 0 : v;
+    }
+    /* scale down when radii overflow the box (CSS rule) */
+    float f = 1;
+    float s1 = out[0] + out[1], s2 = out[1] + out[2], s3 = out[2] + out[3], s4 = out[3] + out[0];
+    if (s1 > w && w / s1 < f) f = w / s1;
+    if (s3 > w && w / s3 < f) f = w / s3;
+    if (s2 > h && h / s2 < f) f = h / s2;
+    if (s4 > h && h / s4 < f) f = h / s4;
+    if (f < 1) for (int i = 0; i < 4; i++) out[i] *= f;
+}
+
+static uint32_t grad_color(const Gradient *g, float t) {
+    if (t <= g->pos[0]) return g->col[0];
+    for (int i = 1; i < g->n; i++) {
+        if (t <= g->pos[i]) {
+            float span = g->pos[i] - g->pos[i - 1];
+            float k = span > 0 ? (t - g->pos[i - 1]) / span : 1;
+            uint32_t a = g->col[i - 1], b = g->col[i], out = 0;
+            for (int sh = 0; sh < 32; sh += 8) {
+                float ca = (float)((a >> sh) & 255), cb = (float)((b >> sh) & 255);
+                out |= (uint32_t)(ca + (cb - ca) * k + 0.5f) << sh;
+            }
+            return out;
+        }
+    }
+    return g->col[g->n - 1];
+}
+
+static void paint_gradient(Canvas *c, const Gradient *g, float fx, float fy, float fw, float fh, const float rad[4]) {
+    int x0 = (int)floorf(fx + 0.5f), y0 = (int)floorf(fy + 0.5f), x1 = (int)floorf(fx + fw + 0.5f), y1 = (int)floorf(fy + fh + 0.5f);
+    float w = (float)(x1 - x0), h = (float)(y1 - y0);
+    if (w <= 0 || h <= 0) return;
+    float R = fmaxf(fmaxf(rad[0], rad[1]), fmaxf(rad[2], rad[3]));
+    float th = g->angle * 3.14159265f / 180.0f, dx = sinf(th), dy = -cosf(th);
+    float len = fabsf(w * dx) + fabsf(h * dy);
+    if (len < 1) len = 1;
+    float gx = (float)x0 + g->cx * w, gy = (float)y0 + g->cy * h;
+    float rx = fmaxf(g->cx, 1 - g->cx) * w * 1.41421f, ry = fmaxf(g->cy, 1 - g->cy) * h * 1.41421f;
+    if (rx < 1) rx = 1;
+    if (ry < 1) ry = 1;
+    int ya = y0 < c->cy0 ? c->cy0 : y0, yb = y1 > c->cy1 ? c->cy1 : y1;
+    int xa = x0 < c->cx0 ? c->cx0 : x0, xb = x1 > c->cx1 ? c->cx1 : x1;
+    for (int y = ya; y < yb; y++)
+        for (int x = xa; x < xb; x++) {
+            float px = (float)x + 0.5f, py = (float)y + 0.5f, t;
+            if (g->radial) {
+                float ex = (px - gx) / rx, ey = (py - gy) / ry;
+                t = sqrtf(ex * ex + ey * ey);
+            } else {
+                t = ((px - ((float)x0 + w / 2)) * dx + (py - ((float)y0 + h / 2)) * dy) / len + 0.5f;
+            }
+            uint32_t col = grad_color(g, t);
+            if (R > 0.5f) {
+                float cov = canvas_rrect_coverage(px, py, (float)x0, (float)y0, w, h, rad);
+                if (cov <= 0) continue;
+                col = ((uint32_t)((float)(col >> 24) * cov) << 24) | (col & 0xFFFFFF);
+            }
+            canvas_blend_px(c, x, y, col);
+        }
+}
+
+static void paint_shadow(Canvas *c, const Style *st, float x, float y, float w, float h, const float rad[4]) {
+    if (!(st->sh_color >> 24)) return;
+    float blur = st->sh_blur, sp = st->sh_spread;
+    int   N = blur > 0 ? (blur > 24 ? 24 : (int)ceilf(blur)) : 1;
+    uint32_t A = st->sh_color >> 24;
+    for (int k = N; k >= 1; k--) {
+        float grow = sp + (blur > 0 ? blur * ((float)k / (float)N) * 0.5f : 0) - (blur > 0 ? blur * 0.25f : 0);
+        float layer = blur > 0 ? (float)A * 1.2f / (float)N : (float)A;
+        float rr[4];
+        for (int i = 0; i < 4; i++) rr[i] = rad[i] + (grow > 0 ? grow : 0);
+        uint32_t a = (uint32_t)(layer > 255 ? 255 : layer);
+        canvas_fill_rrect(c, x + st->sh_x - grow, y + st->sh_y - grow, w + 2 * grow, h + 2 * grow, rr, (a << 24) | (st->sh_color & 0xFFFFFF));
+        if (blur <= 0) break;
+    }
+}
+
 static void paint_borders(PC *pc, const Style *st, const float bw[4], float x, float y, float w, float h, bool left, bool right) {
     Canvas *c = pc->c;
     for (int i = 0; i < 4; i++) {
@@ -141,7 +224,9 @@ static void paint_replaced(PC *pc, const Box *b, float bx, float by) {
     switch (b->repl) {
     case RP_IMG:
         if (b->image) {
-            canvas_draw_image(c, cx, cy, cw, ch, b->image->px, b->image->w, b->image->h);
+            float rad[4];
+            resolve_radii(b->style, b->w, b->h, rad);
+            canvas_draw_image_r(c, cx, cy, cw, ch, b->image->px, b->image->w, b->image->h, rad);
         } else if (b->label && *b->label) {
             BhFont *f = layout_style_font(b->style);
             int   old[4];
@@ -223,8 +308,23 @@ static void paint_box(PC *pc, const Box *b, float ox, float oy, int depth) {
     bool visible = !st->visibility_hidden;
     bool box_vis = by <= pc->vy1 && by + b->h >= pc->vy0;
     if (b->kind != BK_ANON && visible && box_vis) {
-        if ((st->bg >> 24) && b->node != pc->skip_bg) canvas_fill_rect(pc->c, bx, by, b->w, b->h, st->bg);
-        if (b->bw[0] || b->bw[1] || b->bw[2] || b->bw[3]) paint_borders(pc, st, b->bw, bx, by, b->w, b->h, true, true);
+        float rad[4];
+        resolve_radii(st, b->w, b->h, rad);
+        bool rounded = rad[0] > 0.5f || rad[1] > 0.5f || rad[2] > 0.5f || rad[3] > 0.5f;
+        if (st->has_shadow) paint_shadow(pc->c, st, bx, by, b->w, b->h, rad);
+        if ((st->bg >> 24) && b->node != pc->skip_bg) {
+            if (rounded) canvas_fill_rrect(pc->c, bx, by, b->w, b->h, rad, st->bg);
+            else canvas_fill_rect(pc->c, bx, by, b->w, b->h, st->bg);
+        }
+        if (st->grad && b->node != pc->skip_bg) paint_gradient(pc->c, st->grad, bx, by, b->w, b->h, rad);
+        if (b->bw[0] || b->bw[1] || b->bw[2] || b->bw[3]) {
+            bool uniform = b->bw[0] == b->bw[1] && b->bw[1] == b->bw[2] && b->bw[2] == b->bw[3] &&
+                           st->border_style[0] == BS_SOLID && st->border_style[1] == BS_SOLID && st->border_style[2] == BS_SOLID &&
+                           st->border_style[3] == BS_SOLID && side_color(st, 0) == side_color(st, 1) && side_color(st, 1) == side_color(st, 2) &&
+                           side_color(st, 2) == side_color(st, 3);
+            if (rounded && uniform) canvas_stroke_rrect(pc->c, bx, by, b->w, b->h, rad, b->bw[0], side_color(st, 0));
+            else paint_borders(pc, st, b->bw, bx, by, b->w, b->h, true, true);
+        }
         if (b->kind == BK_REPLACED) paint_replaced(pc, b, bx, by);
         if (st->display == DISP_LIST_ITEM && st->list_style != LS_NONE && b->kind == BK_BLOCK) {
             char mt[48];
@@ -260,6 +360,10 @@ void paint_document(const LayoutDoc *d, Canvas *c, int x, int y, int w, int h, f
         else {
             Node *body = dom_find((Node *)html, "body");
             if (body && body->style && (body->style->bg >> 24)) pc.skip_bg = body;
+        }
+        if (pc.skip_bg && pc.skip_bg->style && pc.skip_bg->style->grad) { /* propagated gradient covers the whole document */
+            float none[4] = {0, 0, 0, 0}, dh = d->h > (float)h ? d->h : (float)h;
+            paint_gradient(c, pc.skip_bg->style->grad, (float)x, (float)y - scroll_y, (float)w, dh, none);
         }
         paint_box(&pc, d->root, (float)x, (float)y - scroll_y, 0);
     }

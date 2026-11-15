@@ -606,6 +606,135 @@ static void apply_box4(Apply *ap, Length *dst, char **w, int n, bool allow_auto)
     dst[3] = v[l];
 }
 
+
+/* ---- gradients ---- */
+static int split_top_commas(char *s, char **out, int max) {
+    int n = 0, paren = 0;
+    out[n++] = s;
+    for (char *p = s; *p; p++) {
+        if (*p == '(') paren++;
+        else if (*p == ')' && paren > 0) paren--;
+        else if (*p == ',' && paren == 0 && n < max) { *p = 0; out[n++] = p + 1; }
+    }
+    return n;
+}
+
+static Gradient *parse_gradient(Apply *ap, const char *word) {
+    bool lin = !strncasecmp(word, "linear-gradient(", 16) || !strncasecmp(word, "repeating-linear-gradient(", 26);
+    bool rad = !strncasecmp(word, "radial-gradient(", 16) || !strncasecmp(word, "repeating-radial-gradient(", 26);
+    if (!lin && !rad) return NULL;
+    const char *open = strchr(word, '(') + 1;
+    int depth = 1;
+    const char *e = open;
+    while (*e && depth > 0) { if (*e == '(') depth++; else if (*e == ')') depth--; e++; }
+    char *inner = xstrndup(open, (size_t)(e - open - (depth == 0 ? 1 : 0)));
+    char *args[14];
+    int   na = split_top_commas(inner, args, 14);
+    Gradient *g = arena_alloc(ap->arena, sizeof *g);
+    g->radial = rad;
+    g->angle = 180;
+    g->cx = g->cy = 0.5f;
+    int first = 0;
+    char *a0 = str_trim(args[0]);
+    uint32_t tmp;
+    if (lin) {
+        char *e2;
+        float v = strtof(a0, &e2);
+        if (e2 != a0 && (!strncasecmp(e2, "deg", 3) || !strncasecmp(e2, "turn", 4) || !strncasecmp(e2, "rad", 3) || !strncasecmp(e2, "grad", 4))) {
+            if (!strncasecmp(e2, "turn", 4)) v *= 360; else if (!strncasecmp(e2, "rad", 3)) v *= 57.29578f; else if (!strncasecmp(e2, "grad", 4)) v *= 0.9f;
+            g->angle = v;
+            first = 1;
+        } else if (!strncasecmp(a0, "to ", 3)) {
+            bool t = strstr(a0, "top"), b = strstr(a0, "bottom"), l = strstr(a0, "left"), r = strstr(a0, "right");
+            g->angle = (t && r) ? 45 : (t && l) ? 315 : (b && r) ? 135 : (b && l) ? 225 : t ? 0 : r ? 90 : l ? 270 : 180;
+            first = 1;
+        }
+    } else if (!style_parse_color(a0, &tmp) && !(a0[0] >= '0' && a0[0] <= '9' && strchr(a0, '%') == NULL && false)) {
+        /* shape / size / position argument */
+        char *at = strstr(a0, " at ");
+        if (!at && !strncasecmp(a0, "at ", 3)) at = a0 - 1;
+        if (at) {
+            char *w[4];
+            char *cp = xstrdup(at + 4);
+            int nw = split_words(cp, w, 4);
+            float xs[2] = {0.5f, 0.5f};
+            for (int i = 0; i < nw && i < 2; i++) {
+                float f = 0.5f;
+                if (!strcasecmp(w[i], "left")) f = 0; else if (!strcasecmp(w[i], "right")) f = 1;
+                else if (!strcasecmp(w[i], "top")) f = 0; else if (!strcasecmp(w[i], "bottom")) f = 1;
+                else if (strchr(w[i], '%')) f = strtof(w[i], NULL) / 100;
+                xs[i] = f;
+                if (i == 0 && (!strcasecmp(w[i], "top") || !strcasecmp(w[i], "bottom")) && nw == 1) { xs[1] = f; xs[0] = 0.5f; }
+            }
+            g->cx = xs[0];
+            g->cy = xs[1];
+            free(cp);
+        }
+        first = 1;
+    }
+    for (int i = first; i < na && g->n < 8; i++) {
+        char *w[3];
+        char *cp = xstrdup(str_trim(args[i]));
+        int   nw = split_words(cp, w, 3);
+        uint32_t c;
+        if (nw >= 1 && style_parse_color(w[0], &c)) {
+            g->col[g->n] = c;
+            g->pos[g->n] = (nw >= 2 && strchr(w[1], '%')) ? strtof(w[1], NULL) / 100 : -1;
+            g->n++;
+        }
+        free(cp);
+    }
+    free(inner);
+    if (g->n < 2) return NULL;
+    if (g->pos[0] < 0) g->pos[0] = 0;
+    if (g->pos[g->n - 1] < 0) g->pos[g->n - 1] = 1;
+    for (int i = 1; i < g->n - 1; i++) {
+        if (g->pos[i] >= 0) continue;
+        int j = i;
+        while (g->pos[j] < 0) j++;
+        float a = g->pos[i - 1], b = g->pos[j];
+        for (int k = i; k < j; k++) g->pos[k] = a + (b - a) * (float)(k - i + 1) / (float)(j - i + 1);
+    }
+    return g;
+}
+
+static void apply_radius(Apply *ap, Length *dst, char **w, int n) {
+    Length v[4];
+    if (n < 1) return;
+    char *slash = NULL;
+    for (int i = 0; i < n; i++) if (!strcmp(w[i], "/")) { slash = w[i]; n = i; break; }
+    (void)slash;
+    if (n > 4) n = 4;
+    for (int i = 0; i < n; i++) if (!parse_length(&ap->lc, w[i], &v[i], false)) return;
+    int idx[4][4] = {{0,0,0,0},{0,1,0,1},{0,1,2,1},{0,1,2,3}};
+    for (int i = 0; i < 4; i++) dst[i] = v[idx[n - 1][i]];
+}
+
+static void parse_shadow(Apply *ap, Style *s, char **w, int n, const char *raw) {
+    /* only the first, non-inset shadow */
+    if (n >= 1 && !strcasecmp(w[0], "none")) { s->has_shadow = false; return; }
+    float nums[4] = {0, 0, 0, 0};
+    int   nn = 0;
+    uint32_t col = 0x66000000u;
+    for (int i = 0; i < n; i++) {
+        size_t wl = strlen(w[i]);
+        if (wl && w[i][wl - 1] == ',') { w[i][wl - 1] = 0; if (i > 0) { /* end of first shadow */ n = i + 1; } }
+        if (!strcasecmp(w[i], "inset")) return;
+        Length l;
+        uint32_t c;
+        if (style_parse_color(w[i], &c)) col = c;
+        else if (parse_length(&ap->lc, w[i], &l, false) && nn < 4) nums[nn++] = l.px;
+        if (wl && raw && i + 1 <= n && w[i][wl - 1] == 0) break;
+    }
+    if (nn < 2) return;
+    s->has_shadow = true;
+    s->sh_x = nums[0];
+    s->sh_y = nums[1];
+    s->sh_blur = nn > 2 && nums[2] > 0 ? nums[2] : 0;
+    s->sh_spread = nn > 3 ? nums[3] : 0;
+    s->sh_color = col;
+}
+
 static void copy_prop(Style *d, const Style *s, PropId id) {
     switch (id) {
     case PROP_DISPLAY: d->display = s->display; break;
@@ -744,6 +873,8 @@ static void apply_decl(Apply *ap, const Decl *d, int pass) {
             else if (style_parse_color(words[i], &c) || color_from_gradient(words[i], &c)) found = true;
         }
         s->bg = found ? c : 0;
+        s->grad = NULL;
+        for (int i = 0; i < n; i++) { Gradient *g = parse_gradient(ap, words[i]); if (g) { s->grad = g; break; } }
         break;
     }
     case PROP_FONT_SIZE: {
@@ -1021,6 +1152,16 @@ static void apply_decl(Apply *ap, const Decl *d, int pass) {
         s->position = streq(w0, "relative") ? POS_RELATIVE : streq(w0, "absolute") ? POS_ABSOLUTE : streq(w0, "fixed") ? POS_FIXED
                     : streq(w0, "sticky") ? POS_STICKY : POS_STATIC;
         break;
+    case PROP_BORDER_RADIUS: apply_radius(ap, s->radius, words, n); break;
+    case PROP_BORDER_TOP_LEFT_RADIUS: case PROP_BORDER_TOP_RIGHT_RADIUS: case PROP_BORDER_BOTTOM_RIGHT_RADIUS: case PROP_BORDER_BOTTOM_LEFT_RADIUS:
+        if (parse_length(&ap->lc, w0, &l, false)) s->radius[id - PROP_BORDER_TOP_LEFT_RADIUS] = l;
+        break;
+    case PROP_BACKGROUND_IMAGE: {
+        s->grad = NULL;
+        for (int i = 0; i < n; i++) { Gradient *g = parse_gradient(ap, words[i]); if (g) { s->grad = g; break; } }
+        break;
+    }
+    case PROP_BOX_SHADOW: parse_shadow(ap, s, words, n, val); break;
     case PROP_BORDER_SPACING:
         if (parse_length(&ap->lc, w0, &l, false) && l.px >= 0) s->border_spacing = l.px;
         break;

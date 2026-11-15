@@ -16,6 +16,12 @@ os.makedirs(OUT, exist_ok=True)
 seeds = [open(p, "rb").read() for p in glob.glob("tests/pages/*.html")]
 
 FRAGMENTS = [
+    b"<div style='border-radius:1e30px 50% -5px calc(1px/0) / 3px;width:50px;height:50px;border:3px solid red'>",
+    b"<div style='background:linear-gradient(1e30deg,red 50%,blue 10%,green -100%,rgba(1,2,3,0.5) 1e9%)'>x</div>",
+    b"<div style='background:radial-gradient(circle at 1e9% -1e9%, red, blue);height:30px'>x</div>",
+    b"<div style='background-image:linear-gradient(,,,);box-shadow:1e30px 1e30px 1e30px 1e30px red, inset 0 0 0 #fff'>",
+    b"<div style='box-shadow:0 0 99999px 99999px rgba(0,0,0,.5);border-radius:99999px;width:1px;height:1px'>",
+    b"<div style='background:linear-gradient(" + b"red,blue," * 3000 + b")'>",
     b"<div style='position:absolute;top:-1e30px;bottom:1e30px;left:50%;right:calc(1px/0)'>", b"<div style='position:fixed;inset:0;z-index:-2147483648'>",
     b"<div style='position:relative;top:1e30px;left:-1e30px'>", b"<div style='position:absolute;width:100%;height:100%'><div style='position:absolute;right:0'>",
     b"<div style='position:absolute;display:flex;flex:1'>", b"<span style='position:absolute'>", b"<td style='position:absolute'>",

@@ -176,7 +176,7 @@ int ui_x11_run(Browser *b, const char *initial_url) {
     x.xim = XOpenIM(x.dpy, NULL, NULL, NULL);
     if (x.xim)
         x.xic = XCreateIC(x.xim, XNInputStyle, XIMPreeditNothing | XIMStatusNothing, XNClientWindow, x.win, XNFocusWindow, x.win, NULL);
-    Xutf8SetWMProperties(x.dpy, x.win, "BlackHole", "BlackHole", NULL, 0, NULL, NULL, NULL);
+    Xutf8SetWMProperties(x.dpy, x.win, BH_BRAND, BH_BRAND, NULL, 0, NULL, NULL, NULL);
     XMapWindow(x.dpy, x.win);
     make_image(&x);
 
@@ -186,7 +186,7 @@ int ui_x11_run(Browser *b, const char *initial_url) {
     b->clipboard_set = cb_clip_set;
     b->clipboard_request = cb_clip_request;
 
-    if (initial_url) browser_navigate(b, initial_url, true, true);
+    browser_navigate(b, initial_url ? initial_url : "about:newtab", true, true);
 
     struct pollfd fds[2] = {{ConnectionNumber(x.dpy), POLLIN, 0}, {b->notify_fd[0], POLLIN, 0}};
     while (!b->quit) {

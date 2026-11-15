@@ -34,6 +34,10 @@
     X(JUSTIFY_CONTENT, "justify-content") X(ALIGN_ITEMS, "align-items") X(ALIGN_SELF, "align-self")           \
     X(ALIGN_CONTENT, "align-content") X(FLEX_GROW, "flex-grow") X(FLEX_SHRINK, "flex-shrink")                 \
     X(FLEX_BASIS, "flex-basis") X(FLEX, "flex") X(GAP, "gap") X(ROW_GAP, "row-gap") X(COLUMN_GAP, "column-gap") \
+    X(BORDER_RADIUS, "border-radius") X(BORDER_TOP_LEFT_RADIUS, "border-top-left-radius")                    \
+    X(BORDER_TOP_RIGHT_RADIUS, "border-top-right-radius") X(BORDER_BOTTOM_RIGHT_RADIUS, "border-bottom-right-radius") \
+    X(BORDER_BOTTOM_LEFT_RADIUS, "border-bottom-left-radius") X(BACKGROUND_IMAGE, "background-image")        \
+    X(BOX_SHADOW, "box-shadow")                                                                               \
     X(TOP, "top") X(RIGHT, "right") X(BOTTOM, "bottom") X(LEFT, "left") X(INSET, "inset") X(Z_INDEX, "z-index")
 
 typedef enum {

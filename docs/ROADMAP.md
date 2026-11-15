@@ -16,7 +16,7 @@ Sites reais vão quebrar de formas que ainda não vimos — isso é esperado e �
 |---|---|---|
 | Rede | HTTP/1.1, TLS 1.2/1.3, redirects, gzip, chunked | HTTP/2, HTTP/3, cookies, cache, proxy, Brotli, keep-alive/pool, WebSocket |
 | HTML | parser tolerante, entidades, charsets | `<template>`, shadow DOM, `document.write`, formulários (envio) |
-| CSS | seletores, cascata, `@media`, `var()`, `calc()`, `flex`, `position` | **float**, **grid**, `border-radius`, `box-shadow`, gradientes, `transform`, animações/transições, `@font-face`, `::before/::after`, `:is/:where`, `@supports` real, `content` |
+| CSS | seletores, cascata, `@media`, `var()`, `calc()`, `flex`, `position`, `border-radius`, gradientes, `box-shadow` | **float**, **grid**, `transform`, múltiplas sombras/`inset`, animações/transições, `@font-face`, `::before/::after`, `:is/:where`, `@supports` real, `content` |
 | Texto | FreeType, fallback de fontes | shaping (HarfBuzz-like), bidi (árabe/hebraico), ligaduras, emoji coloridos, fontes web |
 | Imagens | PNG, JPEG (prog.), GIF | WebP, AVIF, SVG, GIF animado, orientação EXIF, `background-image`, `<picture>` real |
 | UI | 1 aba, histórico, endereço, rolagem | abas, favoritos, busca na página, seleção/cópia de texto, zoom, downloads, Wayland nativo |
@@ -73,7 +73,9 @@ DRM** é a meta realista de longo prazo; com DRM, depende da licença.
 
 ## Próximos passos concretos (curto prazo)
 
-- [ ] `border-radius`, `box-shadow`, gradientes lineares
+- [x] `border-radius`, `box-shadow`, gradientes linear/radial (feito)
+- [x] Abas + chrome LUMNA + página de nova aba (feito)
+- [ ] Painel lateral "Emma" do mockup (precisa de backend de IA), favoritos, downloads, ícones reais nos atalhos (exige SVG/imagens)
 - [ ] `float` + `clear` (a base de muitos layouts antigos e das infoboxes)
 - [ ] `::before/::after`
 - [ ] Cookies + cache + HTTP/2

@@ -51,9 +51,13 @@ for f in hello messy index flex position; do
     check "render $f.html" "$BIN --screenshot $TMP/$f.png --size 900x600 tests/pages/$f.html 2>/dev/null && [ \$(nonwhite $TMP/$f.png) -gt 0 ]"
 done
 check "render via HTTP com imagens" "$BIN --screenshot $TMP/img.png --size 900x560 $H/images.html 2>/dev/null && [ \$(nonwhite $TMP/img.png) -gt 3 ]"
-check "UI headless: clique em link navega" "$BIN --screenshot $TMP/click.png --click 150,134 $H/index.html 2>&1 | grep -q 'url=$H/hello.html'"
-check "UI headless: ancora #fragmento" "$BIN --screenshot $TMP/frag.png --click 150,198 $H/index.html 2>&1 | grep -q 'addr=.*index.html#fim'"
+check "UI headless: clique em link navega" "$BIN --screenshot $TMP/click.png --click 150,174 $H/index.html 2>&1 | grep -q 'url=$H/hello.html'"
+check "UI headless: ancora #fragmento" "$BIN --screenshot $TMP/frag.png --click 150,238 $H/index.html 2>&1 | grep -q 'addr=.*index.html#fim'"
 check "pagina de erro para host invalido" "$BIN --screenshot $TMP/err.png --chrome http://localhost:1/x 2>&1 | grep -q 'ok:'"
+
+check "abas: '+' abre nova aba (about:newtab)" "$BIN --screenshot $TMP/tab.png --click 272,20 $H/index.html 2>&1 | grep -q 'url=about:newtab'"
+check "nova aba lista paginas recentes" "$BIN --screenshot $TMP/rec.png --click 150,174 --click 272,20 $H/index.html 2>&1 | grep -q 'url=about:newtab'"
+check "render visual (radius/gradiente/sombra)" "$BIN --screenshot $TMP/vis.png --size 900x330 tests/pages/visual.html 2>/dev/null && [ \$(nonwhite $TMP/vis.png) -gt 0 ]"
 
 echo "== decodificadores de imagem vs ImageMagick"
 if command -v convert >/dev/null; then

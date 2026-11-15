@@ -21,6 +21,12 @@ void    canvas_set_clip(Canvas *c, int x, int y, int w, int h, int old[4]);
 void    canvas_restore_clip(Canvas *c, const int old[4]);
 void    canvas_fill_rect(Canvas *c, float x, float y, float w, float h, uint32_t argb);
 void    canvas_fill_ellipse(Canvas *c, float cx, float cy, float rx, float ry, uint32_t argb);
+void    canvas_blend_px(Canvas *c, int x, int y, uint32_t argb); /* clip aware, straight alpha */
+/* Rounded rectangles; r = {top-left, top-right, bottom-right, bottom-left} radii in pixels. */
+void    canvas_fill_rrect(Canvas *c, float x, float y, float w, float h, const float r[4], uint32_t argb);
+void    canvas_stroke_rrect(Canvas *c, float x, float y, float w, float h, const float r[4], float thick, uint32_t argb);
+float   canvas_rrect_coverage(float px, float py, float x, float y, float w, float h, const float r[4]);
+void    canvas_draw_image_r(Canvas *c, float dx, float dy, float dw, float dh, const uint32_t *src, int sw, int sh, const float r[4]);
 void    canvas_hline(Canvas *c, int x, int y, int w, uint32_t argb);
 void    canvas_blit_argb(Canvas *c, int x, int y, int w, int h, const uint32_t *src, int src_stride);
 /* Scaled blit with nearest/bilinear sampling of an ARGB image into a destination rectangle. */
