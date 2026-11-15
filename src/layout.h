@@ -29,7 +29,7 @@ float      layout_doc_width(const LayoutDoc *d);
 
 /* Paints the document region starting at scroll_y into the canvas rectangle (x, y, w, h). */
 void layout_paint(const LayoutDoc *d, Canvas *c, int x, int y, int w, int h, float scroll_y);
-bool layout_hit_test(const LayoutDoc *d, float doc_x, float doc_y, HitResult *out);
+bool layout_hit_test(const LayoutDoc *d, float doc_x, float doc_y, float scroll_y, HitResult *out);
 /* Document-space y of the element with the given id (for #fragment navigation). Returns -1 if absent. */
 float layout_find_anchor(const LayoutDoc *d, const char *id);
 

@@ -7,12 +7,16 @@
 #include "layout_internal.h"
 
 #define MAX_BOX_DEPTH 180
+#define MAX_CB 64
 
 typedef struct {
     Arena        *a;
     float         vw, vh;
     ImageResolver res;
     void         *user;
+    Box          *cb_stack[MAX_CB];
+    int           ncb;
+    Box          *root;
 } LC;
 
 #define VPUSH(a, arr, n, cap, T, val)                                                  \
@@ -393,9 +397,46 @@ static bool needs_atom(const Node *n, const Style *st) {
     return repl_kind_for(n) != RP_NONE || st->display == DISP_INLINE_BLOCK || st->display == DISP_INLINE_FLEX;
 }
 
+
+/* ---- absolutely positioned boxes: attached to their containing block ---- */
 static Box *build_block_box(LC *lc, const Node *n, int depth);
 
-static void collect_node(LC *lc, ItemList *L, const Node *n, const Node *link, int depth) {
+static void abs_attach(Box *cb, Box *a) {
+    a->abs_next = NULL;
+    /* keep the list ordered by z-index (stable) so painting order is correct */
+    if (!cb->abs_first) { cb->abs_first = cb->abs_last = a; return; }
+    if (a->style->z_index >= cb->abs_last->style->z_index) { cb->abs_last->abs_next = a; cb->abs_last = a; return; }
+    Box **pp = &cb->abs_first;
+    while (*pp && (*pp)->style->z_index <= a->style->z_index) pp = &(*pp)->abs_next;
+    a->abs_next = *pp;
+    *pp = a;
+    if (!a->abs_next) cb->abs_last = a;
+}
+
+/* during tree building: use the explicit stack */
+static void register_abs_build(LC *lc, const Node *n, int depth) {
+    Box *a = build_block_box(lc, n, depth + 1);
+    a->bfc = true;
+    Box *cb = lc->root;
+    if (n->style->position == POS_ABSOLUTE)
+        for (int i = lc->ncb - 1; i >= 0; i--) { cb = lc->cb_stack[i]; break; }
+    a->fixed = n->style->position == POS_FIXED;
+    if (cb) abs_attach(cb, a);
+}
+
+/* at item-collection time: walk the finished box tree upwards */
+static void register_abs_late(LC *lc, Box *owner, const Node *n, int depth) {
+    Box *a = build_block_box(lc, n, depth + 1);
+    a->bfc = true;
+    a->fixed = n->style->position == POS_FIXED;
+    Box *cb = lc->root;
+    if (!a->fixed)
+        for (Box *p = owner; p; p = p->parent)
+            if (p->style->position != POS_STATIC && p->kind != BK_ANON) { cb = p; break; }
+    if (cb) abs_attach(cb, a);
+}
+
+static void collect_node(LC *lc, Box *owner, ItemList *L, const Node *n, const Node *link, int depth) {
     if (depth > MAX_BOX_DEPTH) return;
     if (n->type == NODE_TEXT) {
         if (n->style) collect_text(lc, L, n, n->style, link);
@@ -403,7 +444,8 @@ static void collect_node(LC *lc, ItemList *L, const Node *n, const Node *link, i
     }
     if (n->type != NODE_ELEMENT || !n->style) return;
     const Style *st = n->style;
-    if (st->display == DISP_NONE || is_positioned_out(st)) return;
+    if (st->display == DISP_NONE) return;
+    if (is_positioned_out(st)) { register_abs_late(lc, owner, n, depth); return; }
     if (!strcmp(n->tag, "br")) {
         Item it;
         memset(&it, 0, sizeof it);
@@ -414,7 +456,7 @@ static void collect_node(LC *lc, ItemList *L, const Node *n, const Node *link, i
         return;
     }
     if (st->display == DISP_CONTENTS) {
-        for (const Node *c = n->first_child; c; c = c->next) collect_node(lc, L, c, link, depth + 1);
+        for (const Node *c = n->first_child; c; c = c->next) collect_node(lc, owner, L, c, link, depth + 1);
         return;
     }
     if (needs_atom(n, st)) {
@@ -438,7 +480,7 @@ static void collect_node(LC *lc, ItemList *L, const Node *n, const Node *link, i
     open.style = st;
     open.link = nlink;
     il_push(lc, L, open);
-    for (const Node *c = n->first_child; c; c = c->next) collect_node(lc, L, c, nlink, depth + 1);
+    for (const Node *c = n->first_child; c; c = c->next) collect_node(lc, owner, L, c, nlink, depth + 1);
     open.kind = IT_CLOSE;
     il_push(lc, L, open);
 }
@@ -452,7 +494,7 @@ static void ensure_items(LC *lc, Box *b) {
         const Node *link = NULL;
         for (const Node *p = n->parent; p; p = p->parent) /* inherited link context for text directly under <a> boxes */
             if (dom_is(p, "a") && dom_attr(p, "href")) { link = p; break; }
-        collect_node(lc, &L, n, link, 0);
+        collect_node(lc, b, &L, n, link, 0);
     }
     b->items = L.v;
     b->nitems = L.n;
@@ -1008,6 +1050,63 @@ static float layout_table_content(LC *lc, Box *tb, float avail_content_w, bool f
     return y;
 }
 
+
+/* position: relative shifts the box after normal layout, without affecting siblings */
+static void apply_relative(Box *c, float cb_w, float cb_h) {
+    const Style *st = c->style;
+    if (st->position != POS_RELATIVE) return;
+    float dx = 0, dy = 0;
+    if (!st->offset[3].is_auto) dx = len_resolve(&st->offset[3], cb_w, 0);
+    else if (!st->offset[1].is_auto) dx = -len_resolve(&st->offset[1], cb_w, 0);
+    if (!st->offset[0].is_auto) dy = len_resolve(&st->offset[0], cb_h, 0);
+    else if (!st->offset[2].is_auto) dy = -len_resolve(&st->offset[2], cb_h, 0);
+    c->x += dx;
+    c->y += dy;
+}
+
+/* Lays out the absolutely positioned boxes anchored to cb. cb's own geometry must be final. */
+static void layout_abs_children(LC *lc, Box *cb) {
+    bool  is_root = cb == lc->root;
+    float pw = is_root ? lc->vw : cb->w - cb->bw[1] - cb->bw[3];
+    float ph = is_root ? lc->vh : cb->h - cb->bw[0] - cb->bw[2];
+    float ox = is_root ? 0 : cb->bw[3], oy = is_root ? 0 : cb->bw[0];
+    for (Box *a = cb->abs_first; a; a = a->abs_next) {
+        const Style *st = a->style;
+        float cw = a->fixed ? lc->vw : pw, chh = a->fixed ? lc->vh : ph;
+        resolve_box_model(a, cw);
+        bool  l = !st->offset[3].is_auto, r = !st->offset[1].is_auto, t = !st->offset[0].is_auto, b = !st->offset[2].is_auto;
+        float left = l ? len_resolve(&st->offset[3], cw, 0) : 0, right = r ? len_resolve(&st->offset[1], cw, 0) : 0;
+        float top = t ? len_resolve(&st->offset[0], chh, 0) : 0, bottom = b ? len_resolve(&st->offset[2], chh, 0) : 0;
+        float hpad = a->p[1] + a->p[3] + a->bw[1] + a->bw[3];
+        if (a->kind == BK_REPLACED) {
+            layout_block(lc, a, cw, -1);
+        } else {
+            float forced;
+            if (!st->width.is_auto) forced = len_resolve(&st->width, cw, 0) + (st->box_sizing_border ? 0 : hpad);
+            else if (l && r) forced = cw - left - right - a->m[1] - a->m[3];
+            else {
+                float mn, mx;
+                measure_box(lc, a, &mn, &mx);
+                float room = cw - (l ? left : 0) - (r ? right : 0) - a->m[1] - a->m[3];
+                forced = fminf_(mx, fmaxf_(mn, room));
+            }
+            if (forced < hpad) forced = hpad;
+            layout_block(lc, a, cw, forced);
+            if (!st->height.is_auto && st->height.pct == 0) { /* height set explicitly */ }
+            else if (t && b && st->height.is_auto) {
+                float want = chh - top - bottom - a->m[0] - a->m[2];
+                if (want > a->h) a->h = want;
+            }
+        }
+        float x = l ? left + a->m[3] : (r ? cw - right - a->m[1] - a->w : a->m[3]);
+        float y = t ? top + a->m[0] : (b ? chh - bottom - a->m[2] - a->h : a->m[0]);
+        a->x = ox + x;
+        a->y = oy + y;
+        a->mt_eff = a->m[0];
+        a->mb_eff = a->m[2];
+    }
+}
+
 /* ================================================================== flexbox === */
 typedef struct {
     Box  *b;
@@ -1242,6 +1341,7 @@ static float layout_flex(LC *lc, Box *c, float W, float def_h, float min_h, floa
             }
             b->mt_eff = b->m[0];
             b->mb_eff = b->m[2];
+            apply_relative(b, W, 0);
             pos = main_pos + L[i].size + L[i].mb + between;
         }
         start = end;
@@ -1329,6 +1429,7 @@ static void layout_block(LC *lc, Box *b, float cb_w, float forced_bw) {
         b->w = content_w + hpad;
         b->h = content_h + vpad;
         if (!st->height.is_auto && st->height.pct == 0 && st->height.px > b->h) b->h = st->height.px;
+        if (b->abs_first) layout_abs_children(lc, b);
         return;
     }
 
@@ -1372,6 +1473,7 @@ static void layout_block(LC *lc, Box *b, float cb_w, float forced_bw) {
             }
             c->y = b->cy + cy_;
             c->x = b->cx + c->m[3];
+            apply_relative(c, content_w, 0);
             cursor = cy_ + c->h;
             prev_mb = c->mb_eff;
             first = false;
@@ -1402,6 +1504,7 @@ static void layout_block(LC *lc, Box *b, float cb_w, float forced_bw) {
     b->h = h + vpad;
     b->mt_eff = mt;
     b->mb_eff = mb;
+    if (b->abs_first) layout_abs_children(lc, b);
 }
 
 static void layout_atom(LC *lc, Box *a, float avail) {
@@ -1545,7 +1648,10 @@ static Box *build_block_box(LC *lc, const Node *n, int depth) {
     const Style *st = n->style;
     b->bfc = st->overflow != OV_VISIBLE || st->display == DISP_TABLE_CELL || st->display == DISP_INLINE_BLOCK ||
              st->display == DISP_FLEX || st->display == DISP_INLINE_FLEX || st->display == DISP_TABLE_CAPTION;
+    bool positioned = st->position != POS_STATIC || !n->parent || n->parent->type == NODE_DOCUMENT;
+    if (positioned && lc->ncb < MAX_CB) lc->cb_stack[lc->ncb++] = b;
     if (depth < MAX_BOX_DEPTH) build_children(lc, b, n, depth + 1);
+    if (positioned && lc->ncb > 0 && lc->cb_stack[lc->ncb - 1] == b) lc->ncb--;
     return b;
 }
 
@@ -1560,15 +1666,19 @@ typedef struct {
     int          n, cap;
 } NodeList;
 
-static void flatten_children(LC *lc, NodeList *out, const Node *node, int depth) {
+static void flatten_children(LC *lc, NodeList *out, const Node *node, int depth, int box_depth) {
     if (depth > 12) return;
     for (const Node *c = node->first_child; c; c = c->next) {
         if (c->type == NODE_TEXT) {
             VPUSH(lc->a, out->v, out->n, out->cap, const Node *, c);
         } else if (c->type == NODE_ELEMENT && c->style) {
-            if (c->style->display == DISP_NONE || is_positioned_out(c->style)) continue;
+            if (c->style->display == DISP_NONE) continue;
+            if (is_positioned_out(c->style)) {
+                if (box_depth < MAX_BOX_DEPTH) register_abs_build(lc, c, box_depth);
+                continue;
+            }
             if (c->style->display == DISP_CONTENTS && repl_kind_for(c) == RP_NONE) {
-                flatten_children(lc, out, c, depth + 1);
+                flatten_children(lc, out, c, depth + 1, box_depth);
                 continue;
             }
             VPUSH(lc->a, out->v, out->n, out->cap, const Node *, c);
@@ -1598,7 +1708,7 @@ static const Style *make_anon_style(LC *lc, const Style *parent) {
 
 static void build_children(LC *lc, Box *parent, const Node *node, int depth) {
     NodeList L = {0};
-    flatten_children(lc, &L, node, 0);
+    flatten_children(lc, &L, node, 0, depth);
     if (node->style && is_flex_container(node->style) && parent->kind != BK_ANON) {
         /* every in-flow child of a flex container is a flex item (text runs become anonymous items) */
         for (int i = 0; i < L.n; i++) {
@@ -1660,7 +1770,13 @@ LayoutDoc *layout_create(Node *doc, float vw, float vh, ImageResolver res, void 
     d->vh = vh;
     d->resolver = res;
     d->user = user;
-    LC lc = {&d->arena, vw, vh, res, user};
+    LC lc;
+    memset(&lc, 0, sizeof lc);
+    lc.a = &d->arena;
+    lc.vw = vw;
+    lc.vh = vh;
+    lc.res = res;
+    lc.user = user;
 
     Node *html = NULL;
     for (Node *c = doc->first_child; c; c = c->next)
@@ -1669,9 +1785,15 @@ LayoutDoc *layout_create(Node *doc, float vw, float vh, ImageResolver res, void 
         d->canvas_bg = 0xFFFFFFFF;
         return d;
     }
-    Box *root = build_block_box(&lc, html, 0);
+    Box *root = new_box(&lc, html, html->style, BK_BLOCK);
+    lc.root = root;
     root->bfc = true;
+    root->style = html->style;
     d->root = root;
+    if (html->style->display == DISP_LIST_ITEM) root->ordinal = 1;
+    lc.cb_stack[lc.ncb++] = root;
+    build_children(&lc, root, html, 1);
+    lc.ncb = 0;
     layout_block(&lc, root, vw, -1);
     root->x = root->m[3];
     root->y = root->mt_eff;
@@ -1696,5 +1818,5 @@ void  layout_free(LayoutDoc *d) {
 float layout_doc_height(const LayoutDoc *d) { return d->h; }
 float layout_doc_width(const LayoutDoc *d) { return d->w; }
 void  layout_paint(const LayoutDoc *d, Canvas *c, int x, int y, int w, int h, float scroll_y) { paint_document(d, c, x, y, w, h, scroll_y); }
-bool  layout_hit_test(const LayoutDoc *d, float x, float y, HitResult *out) { return hit_test_document(d, x, y, out); }
+bool  layout_hit_test(const LayoutDoc *d, float x, float y, float scroll_y, HitResult *out) { return hit_test_document(d, x, y, scroll_y, out); }
 float layout_find_anchor(const LayoutDoc *d, const char *id) { return find_anchor_y(d, id); }

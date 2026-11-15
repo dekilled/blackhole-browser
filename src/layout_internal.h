@@ -73,6 +73,8 @@ struct Box {
     const char  *label;   /* replaced content text (alt, value, option text) */
     Image       *image;
     const Node  *atom_link;
+    Box         *abs_first, *abs_last, *abs_next; /* absolutely positioned descendants anchored to this box */
+    bool         fixed;                       /* position: fixed (viewport relative) */
 };
 
 struct LayoutDoc {
@@ -90,7 +92,7 @@ BhFont *layout_style_font(const Style *s);
 
 /* paint.c */
 void paint_document(const LayoutDoc *d, Canvas *c, int x, int y, int w, int h, float scroll_y);
-bool hit_test_document(const LayoutDoc *d, float x, float y, HitResult *out);
+bool hit_test_document(const LayoutDoc *d, float x, float y, float scroll_y, HitResult *out);
 float find_anchor_y(const LayoutDoc *d, const char *id);
 
 #endif

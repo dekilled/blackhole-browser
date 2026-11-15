@@ -17,6 +17,8 @@
 #include "ui.h"
 #include "util.h"
 
+int selftest_run(void);
+
 static void dump_dom(const Node *root) {
     const Node *n = root;
     int         depth = 0;
@@ -84,6 +86,7 @@ int main(int argc, char **argv) {
         buf_free(&raw);
         return 0;
     }
+    if (argc == 2 && !strcmp(argv[1], "--selftest")) return selftest_run();
     const char *shot = NULL, *url = NULL;
     int         W = 1024, H = 768;
     float       scroll = 0;
@@ -177,7 +180,7 @@ int main(int argc, char **argv) {
         if (wheel != 0) browser_wheel(b, 0, 0, wheel);
         browser_render(b);
         bool ok = canvas_write_png(b->canvas, shot);
-        fprintf(stderr, "%s: %s (%dx%d) url=%s\n", ok ? "ok" : "ERRO", shot, W, H, b->page ? b->page->url : "-");
+        fprintf(stderr, "%s: %s (%dx%d) url=%s addr=%s\n", ok ? "ok" : "ERRO", shot, W, H, b->page ? b->page->url : "-", b->addr);
         browser_free(b);
         free(owned);
         return ok ? 0 : 1;

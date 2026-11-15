@@ -9,6 +9,7 @@ typedef struct {
     Canvas       *c;
     const Node   *skip_bg; /* element whose background was propagated to the canvas */
     float         vy0, vy1;
+    float         vx, vy; /* canvas origin of the viewport (for position: fixed) */
 } PC;
 
 static void roman(char *out, int n, bool upper) {
@@ -241,6 +242,10 @@ static void paint_box(PC *pc, const Box *b, float ox, float oy, int depth) {
                               (int)ceilf(b->w - b->bw[1] - b->bw[3]), (int)ceilf(b->h - b->bw[0] - b->bw[2]), old);
     if (b->nfrags || b->nspans) paint_frags(pc, b, bx, by, depth);
     for (const Box *c = b->first; c; c = c->next) paint_box(pc, c, bx, by, depth + 1);
+    for (const Box *a = b->abs_first; a; a = a->abs_next) {
+        if (a->fixed) paint_box(pc, a, pc->vx, pc->vy, depth + 1);
+        else paint_box(pc, a, bx, by, depth + 1);
+    }
     if (clip) canvas_restore_clip(pc->c, old);
 }
 
@@ -249,7 +254,7 @@ void paint_document(const LayoutDoc *d, Canvas *c, int x, int y, int w, int h, f
     canvas_set_clip(c, x, y, w, h, old);
     canvas_fill_rect(c, (float)x, (float)y, (float)w, (float)h, d->canvas_bg);
     if (d->root) {
-        PC pc = {c, NULL, (float)y, (float)(y + h)}; /* visible range, in canvas coordinates like `by` */
+        PC pc = {c, NULL, (float)y, (float)(y + h), (float)x, (float)y}; /* visible range, in canvas coordinates like `by` */
         const Node *html = d->root->node;
         if (html->style && (html->style->bg >> 24)) pc.skip_bg = html;
         else {
@@ -268,7 +273,7 @@ static const Node *link_ancestor(const Node *n) {
     return NULL;
 }
 
-static bool hit_box(const Box *b, float ox, float oy, float x, float y, HitResult *out, int depth) {
+static bool hit_box(const Box *b, float ox, float oy, float x, float y, float scroll, HitResult *out, int depth) {
     if (depth > 400) return false;
     float bx = ox + b->x, by = oy + b->y;
     if (x < bx || x >= bx + b->w || y < by || y >= by + b->h) {
@@ -278,7 +283,7 @@ static bool hit_box(const Box *b, float ox, float oy, float x, float y, HitResul
     for (int i = b->nfrags - 1; i >= 0; i--) {
         const Frag *f = &b->frags[i];
         if (f->box) {
-            if (hit_box(f->box, bx, by, x, y, out, depth + 1)) {
+            if (hit_box(f->box, bx, by, x, y, scroll, out, depth + 1)) {
                 if (!out->link) out->link = f->link;
                 return true;
             }
@@ -291,12 +296,20 @@ static bool hit_box(const Box *b, float ox, float oy, float x, float y, HitResul
             }
         }
     }
-    /* children paint in order, so the last one containing the point is on top */
+    /* children paint in order, so the last one containing the point is on top (absolute boxes paint last) */
     HitResult best = {NULL, NULL};
     bool      found = false;
     for (const Box *c = b->first; c; c = c->next) {
         HitResult tmp = {NULL, NULL};
-        if (hit_box(c, bx, by, x, y, &tmp, depth + 1)) {
+        if (hit_box(c, bx, by, x, y, scroll, &tmp, depth + 1)) {
+            best = tmp;
+            found = true;
+        }
+    }
+    for (const Box *a = b->abs_first; a; a = a->abs_next) {
+        HitResult tmp = {NULL, NULL};
+        bool      hit = a->fixed ? hit_box(a, 0, 0, x, y - scroll, scroll, &tmp, depth + 1) : hit_box(a, bx, by, x, y, scroll, &tmp, depth + 1);
+        if (hit) {
             best = tmp;
             found = true;
         }
@@ -310,11 +323,11 @@ static bool hit_box(const Box *b, float ox, float oy, float x, float y, HitResul
     return true;
 }
 
-bool hit_test_document(const LayoutDoc *d, float x, float y, HitResult *out) {
+bool hit_test_document(const LayoutDoc *d, float x, float y, float scroll_y, HitResult *out) {
     out->node = NULL;
     out->link = NULL;
     if (!d->root) return false;
-    return hit_box(d->root, 0, 0, x, y, out, 0);
+    return hit_box(d->root, 0, 0, x, y, scroll_y, out, 0);
 }
 
 /* ================================================================ anchors ==== */

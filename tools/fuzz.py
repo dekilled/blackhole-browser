@@ -16,6 +16,9 @@ os.makedirs(OUT, exist_ok=True)
 seeds = [open(p, "rb").read() for p in glob.glob("tests/pages/*.html")]
 
 FRAGMENTS = [
+    b"<div style='position:absolute;top:-1e30px;bottom:1e30px;left:50%;right:calc(1px/0)'>", b"<div style='position:fixed;inset:0;z-index:-2147483648'>",
+    b"<div style='position:relative;top:1e30px;left:-1e30px'>", b"<div style='position:absolute;width:100%;height:100%'><div style='position:absolute;right:0'>",
+    b"<div style='position:absolute;display:flex;flex:1'>", b"<span style='position:absolute'>", b"<td style='position:absolute'>",
     b"<div style='display:flex;flex-wrap:wrap;gap:-5px'>", b"<div style='display:flex;flex-direction:column;height:1e30px'>",
     b"<div style='flex:1e30 1e30 -50px;min-width:1e30px;max-width:-1px'>", b"<div style='display:inline-flex;flex:0 0 1e9px'>",
     b"<div style='display:flex;justify-content:space-around;align-items:baseline;margin:auto'>",
@@ -33,6 +36,10 @@ FRAGMENTS = [
 ]
 
 ADVERSARIAL = {
+    "abs_deep.html": b"<div style='position:absolute;top:1px'>" * 5000 + b"x",
+    "abs_many.html": b"<div style='position:relative'>" + b"<i style='position:absolute;right:1px;top:50%'>x</i>" * 40000 + b"</div>",
+    "abs_fixed_inline.html": b"<p>" + b"a <b style='position:fixed;width:calc(100%/0)'>b</b> " * 20000,
+    "abs_table.html": b"<table style='position:absolute'><tr><td style='position:relative;top:1e30px'>x</table>" * 500,
     "flex_deep.html": b"<div style='display:flex'>" * 3000 + b"x",
     "flex_many.html": b"<div style='display:flex;flex-wrap:wrap'>" + b"<div style='flex:1 1 10px'>a</div>" * 30000 + b"</div>",
     "flex_col_many.html": b"<div style='display:flex;flex-direction:column;height:100px'>" + b"<p style='flex:1 0 0'>a</p>" * 5000 + b"</div>",

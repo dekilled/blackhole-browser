@@ -531,7 +531,7 @@ static void update_hover(Browser *b, int x, int y) {
     if (y >= 8 && y < 38 && x >= 120) ck = CURSOR_TEXT;
     else if (y >= CHROME_H && b->page && b->page->layout) {
         HitResult hr;
-        if (layout_hit_test(b->page->layout, (float)x, (float)(y - CHROME_H) + b->scroll_y, &hr)) {
+        if (layout_hit_test(b->page->layout, (float)x, (float)(y - CHROME_H) + b->scroll_y, b->scroll_y, &hr)) {
             link = hr.link;
             if (link) ck = CURSOR_HAND;
         }
@@ -571,7 +571,7 @@ void browser_mouse_down(Browser *b, int x, int y, int button) {
     }
     if (!b->page || !b->page->layout) return;
     HitResult hr;
-    if (layout_hit_test(b->page->layout, (float)x, (float)(y - CHROME_H) + b->scroll_y, &hr) && hr.link) {
+    if (layout_hit_test(b->page->layout, (float)x, (float)(y - CHROME_H) + b->scroll_y, b->scroll_y, &hr) && hr.link) {
         const char *href = dom_attr(hr.link, "href");
         if (!href) return;
         while (is_space((unsigned char)*href)) href++;

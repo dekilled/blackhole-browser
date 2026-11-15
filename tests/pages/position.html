@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Position</title>
+<style>
+ body{font-family:sans-serif;margin:0;background:#f4f5f7}
+ .bar{position:fixed;top:0;left:0;right:0;height:40px;background:#14141a;color:#fff;line-height:40px;padding:0 16px;z-index:10}
+ .wrap{padding:56px 24px 24px}
+ .rel{position:relative;background:#fff;border:1px solid #ccc;height:150px;margin-bottom:20px}
+ .badge{position:absolute;top:-10px;right:-10px;background:#e5484d;color:#fff;border-radius:12px;padding:4px 10px}
+ .abs{position:absolute;left:20px;bottom:15px;background:#7c5cff;color:#fff;padding:8px 12px}
+ .center{position:absolute;top:50%;left:50%;width:120px;margin-left:-60px;background:#ffd24a;text-align:center;padding:6px}
+ .shift{position:relative;top:10px;left:30px;background:#cfe;padding:6px;display:inline-block}
+ .sr{position:absolute;width:1px;height:1px;overflow:hidden}
+ .stretch{position:absolute;top:0;bottom:0;right:0;width:60px;background:#c2e0ff}
+</style></head><body>
+<div class="bar">Barra fixa no topo (position: fixed)</div>
+<div class="wrap">
+ <div class="rel"><span class="badge">3 novos</span><div class="abs">canto inferior esquerdo</div><div class="center">centro</div><div class="stretch"></div></div>
+ <p>Texto normal antes. <span class="shift">deslocado (relative)</span> texto depois.<span class="sr">texto só para leitor de tela</span></p>
+ <p style="height:900px">Parágrafo alto para testar a rolagem com a barra fixa.</p>
+</div></body></html>
