@@ -466,6 +466,10 @@ static void style_init(Style *s) {
     s->color = MAKE_RGB(0, 0, 0);
     s->opacity = 1;
     s->list_style = LS_DISC;
+    s->flex_shrink = 1;
+    s->align_self = AI_AUTO;
+    s->flex_basis.is_auto = true;
+    for (int i = 0; i < 4; i++) s->offset[i].is_auto = true;
     s->width.is_auto = s->height.is_auto = s->min_width.is_auto = s->min_height.is_auto = true;
     s->max_width.is_auto = s->max_height.is_auto = true;
     for (int i = 0; i < 4; i++) {
@@ -1020,6 +1024,75 @@ static void apply_decl(Apply *ap, const Decl *d, int pass) {
     case PROP_BORDER_SPACING:
         if (parse_length(&ap->lc, w0, &l, false) && l.px >= 0) s->border_spacing = l.px;
         break;
+    case PROP_FLEX_DIRECTION:
+        s->flex_dir = streq(w0, "row-reverse") ? FD_ROW_REV : streq(w0, "column") ? FD_COL : streq(w0, "column-reverse") ? FD_COL_REV : FD_ROW;
+        break;
+    case PROP_FLEX_WRAP: s->flex_wrap = streq(w0, "wrap") ? 1 : streq(w0, "wrap-reverse") ? 2 : 0; break;
+    case PROP_FLEX_FLOW:
+        for (int i = 0; i < n; i++) {
+            if (streq(words[i], "wrap")) s->flex_wrap = 1;
+            else if (streq(words[i], "nowrap")) s->flex_wrap = 0;
+            else if (streq(words[i], "wrap-reverse")) s->flex_wrap = 2;
+            else if (streq(words[i], "row")) s->flex_dir = FD_ROW;
+            else if (streq(words[i], "row-reverse")) s->flex_dir = FD_ROW_REV;
+            else if (streq(words[i], "column")) s->flex_dir = FD_COL;
+            else if (streq(words[i], "column-reverse")) s->flex_dir = FD_COL_REV;
+        }
+        break;
+    case PROP_JUSTIFY_CONTENT:
+        s->justify = streq(w0, "flex-end") || streq(w0, "end") || streq(w0, "right") ? JC_END : streq(w0, "center") ? JC_CENTER
+                   : streq(w0, "space-between") ? JC_BETWEEN : streq(w0, "space-around") ? JC_AROUND : streq(w0, "space-evenly") ? JC_EVENLY : JC_START;
+        break;
+    case PROP_ALIGN_ITEMS: case PROP_ALIGN_SELF: {
+        uint8_t v = streq(w0, "flex-start") || streq(w0, "start") || streq(w0, "self-start") ? AI_START : streq(w0, "flex-end") || streq(w0, "end") || streq(w0, "self-end") ? AI_END
+                  : streq(w0, "center") ? AI_CENTER : streq(w0, "baseline") || streq(w0, "first baseline") ? AI_BASELINE : streq(w0, "stretch") || streq(w0, "normal") ? AI_STRETCH : AI_AUTO;
+        if (id == PROP_ALIGN_ITEMS) s->align_items = v == AI_AUTO ? AI_STRETCH : v;
+        else s->align_self = v;
+        break;
+    }
+    case PROP_ALIGN_CONTENT: break;
+    case PROP_FLEX_GROW: { char *e; float v = strtof(w0, &e); if (e != w0 && v >= 0) s->flex_grow = v; break; }
+    case PROP_FLEX_SHRINK: { char *e; float v = strtof(w0, &e); if (e != w0 && v >= 0) s->flex_shrink = v; break; }
+    case PROP_FLEX_BASIS:
+        if (parse_length(&ap->lc, w0, &l, true)) s->flex_basis = l;
+        break;
+    case PROP_FLEX: {
+        float grow = 0, shrink = 1;
+        Length basis = {0, 0, true};
+        if (n == 1 && streq(w0, "none")) { grow = 0; shrink = 0; }
+        else if (n == 1 && streq(w0, "auto")) { grow = 1; shrink = 1; }
+        else {
+            int numbers = 0;
+            basis = (Length){0, 0, false}; /* a bare number means flex-basis: 0% */
+            basis.pct = 0;
+            bool basis_set = false;
+            for (int i = 0; i < n; i++) {
+                char *e;
+                float v = strtof(words[i], &e);
+                if (e != words[i] && !*e) { if (numbers == 0) grow = v; else if (numbers == 1) shrink = v; numbers++; }
+                else if (streq(words[i], "auto")) { basis = (Length){0, 0, true}; basis_set = true; }
+                else if (parse_length(&ap->lc, words[i], &l, true)) { basis = l; basis_set = true; }
+            }
+            if (!basis_set) basis = (Length){0, 0, false};
+            if (numbers == 1 && !basis_set) shrink = 1;
+        }
+        s->flex_grow = grow;
+        s->flex_shrink = shrink;
+        s->flex_basis = basis;
+        break;
+    }
+    case PROP_GAP:
+        if (parse_length(&ap->lc, w0, &l, false)) { s->row_gap = l.px; s->col_gap = n > 1 && parse_length(&ap->lc, words[1], &l, false) ? l.px : s->row_gap; }
+        break;
+    case PROP_ROW_GAP: if (parse_length(&ap->lc, w0, &l, false)) s->row_gap = l.px; break;
+    case PROP_COLUMN_GAP: if (parse_length(&ap->lc, w0, &l, false)) s->col_gap = l.px; break;
+    case PROP_TOP: case PROP_RIGHT: case PROP_BOTTOM: case PROP_LEFT:
+        if (parse_length(&ap->lc, w0, &l, true)) s->offset[id - PROP_TOP] = l;
+        break;
+    case PROP_INSET:
+        if (parse_length(&ap->lc, w0, &l, true)) for (int i = 0; i < 4; i++) s->offset[i] = l;
+        break;
+    case PROP_Z_INDEX: s->z_index = atoi(w0); break;
     case PROP_BORDER_COLLAPSE: s->border_collapse = streq(w0, "collapse"); break;
     case PROP_OPACITY: {
         char *e;

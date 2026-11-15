@@ -29,7 +29,12 @@
     X(MIN_HEIGHT, "min-height") X(MAX_HEIGHT, "max-height") X(LIST_STYLE, "list-style")                       \
     X(LIST_STYLE_TYPE, "list-style-type") X(BOX_SIZING, "box-sizing") X(FLOAT, "float") X(CLEAR, "clear")     \
     X(OVERFLOW, "overflow") X(POSITION, "position") X(OPACITY, "opacity")                        \
-    X(BORDER_SPACING, "border-spacing") X(BORDER_COLLAPSE, "border-collapse")
+    X(BORDER_SPACING, "border-spacing") X(BORDER_COLLAPSE, "border-collapse")                                 \
+    X(FLEX_DIRECTION, "flex-direction") X(FLEX_WRAP, "flex-wrap") X(FLEX_FLOW, "flex-flow")                   \
+    X(JUSTIFY_CONTENT, "justify-content") X(ALIGN_ITEMS, "align-items") X(ALIGN_SELF, "align-self")           \
+    X(ALIGN_CONTENT, "align-content") X(FLEX_GROW, "flex-grow") X(FLEX_SHRINK, "flex-shrink")                 \
+    X(FLEX_BASIS, "flex-basis") X(FLEX, "flex") X(GAP, "gap") X(ROW_GAP, "row-gap") X(COLUMN_GAP, "column-gap") \
+    X(TOP, "top") X(RIGHT, "right") X(BOTTOM, "bottom") X(LEFT, "left") X(INSET, "inset") X(Z_INDEX, "z-index")
 
 typedef enum {
     PROP_UNKNOWN = 0,

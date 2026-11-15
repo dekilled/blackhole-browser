@@ -60,6 +60,7 @@ static void resolve_box_model(Box *b, float cb_w) {
 }
 
 static bool is_positioned_out(const Style *s) { return s->position == POS_ABSOLUTE || s->position == POS_FIXED; }
+static bool is_flex_container(const Style *st) { return st->display == DISP_FLEX || st->display == DISP_INLINE_FLEX; }
 
 static Box *new_box(LC *lc, const Node *n, const Style *st, BoxKind kind) {
     Box *b = arena_alloc(lc->a, sizeof *b);
@@ -1007,6 +1008,252 @@ static float layout_table_content(LC *lc, Box *tb, float avail_content_w, bool f
     return y;
 }
 
+/* ================================================================== flexbox === */
+typedef struct {
+    Box  *b;
+    float base, minv, maxv, size;   /* main axis, border-box */
+    float ma, mb, ca, cb;           /* main/cross margins (start,end) */
+    bool  auto_ma, auto_mb, auto_ca, auto_cb;
+    bool  frozen;
+    float cross;                    /* outer cross size */
+    float cross_inner;              /* border-box cross size */
+    float grow, shrink;
+    int   line;
+} FItem;
+
+static float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+static void flex_resolve(FItem *it, int n, float target, float gap) {
+    /* target = available main size for this line (border-box + margins + gaps) */
+    float used_gaps = gap * (float)(n > 0 ? n - 1 : 0);
+    for (int i = 0; i < n; i++) it[i].frozen = false, it[i].size = it[i].base;
+    for (int iter = 0; iter < n + 2; iter++) {
+        float sum_frozen = 0, sum_unfrozen_base = 0, grow_sum = 0, shrink_scaled = 0;
+        int   unfrozen = 0;
+        for (int i = 0; i < n; i++) {
+            float margins = it[i].ma + it[i].mb;
+            if (it[i].frozen) sum_frozen += it[i].size + margins;
+            else {
+                sum_unfrozen_base += it[i].base + margins;
+                grow_sum += it[i].grow;
+                shrink_scaled += it[i].shrink * it[i].base;
+                unfrozen++;
+            }
+        }
+        if (!unfrozen) break;
+        float free_space = target - used_gaps - sum_frozen - sum_unfrozen_base;
+        for (int i = 0; i < n; i++) {
+            if (it[i].frozen) continue;
+            float sz = it[i].base;
+            if (free_space > 0 && grow_sum > 0) sz += free_space * it[i].grow / (grow_sum < 1 ? 1 : grow_sum) * (grow_sum < 1 ? grow_sum : 1) ;
+            else if (free_space < 0 && shrink_scaled > 0) sz += free_space * (it[i].shrink * it[i].base) / shrink_scaled;
+            it[i].size = sz;
+        }
+        /* clamp and freeze violators */
+        float total_violation = 0;
+        for (int i = 0; i < n; i++) {
+            if (it[i].frozen) continue;
+            float c = clampf(it[i].size, it[i].minv, it[i].maxv);
+            total_violation += c - it[i].size;
+            it[i].size = c;
+        }
+        bool any = false;
+        for (int i = 0; i < n; i++) {
+            if (it[i].frozen) continue;
+            bool freeze = total_violation == 0 ? true : total_violation > 0 ? it[i].size <= it[i].minv + 0.001f : it[i].size >= it[i].maxv - 0.001f;
+            /* items that hit their bound keep the clamped value; the rest are re-distributed */
+            if (freeze) { it[i].frozen = true; any = true; }
+        }
+        if (total_violation == 0 || !any) break;
+    }
+}
+
+static float layout_flex(LC *lc, Box *c, float W, float def_h, float min_h, float max_h) {
+    const Style *st = c->style;
+    bool  row = st->flex_dir == FD_ROW || st->flex_dir == FD_ROW_REV;
+    bool  rev = st->flex_dir == FD_ROW_REV || st->flex_dir == FD_COL_REV;
+    float main_gap = row ? st->col_gap : st->row_gap, cross_gap = row ? st->row_gap : st->col_gap;
+    int   n = 0;
+    for (Box *b = c->first; b; b = b->next) n++;
+    if (n == 0) return 0;
+    FItem *it = arena_alloc(lc->a, sizeof(FItem) * (size_t)n);
+    Box  **order = arena_alloc(lc->a, sizeof(Box *) * (size_t)n);
+    {
+        int i = 0;
+        for (Box *b = c->first; b; b = b->next) order[i++] = b;
+        if (rev) for (int a = 0, z = n - 1; a < z; a++, z--) { Box *t = order[a]; order[a] = order[z]; order[z] = t; }
+    }
+    float main_avail = row ? W : def_h; /* column: <0 means indefinite */
+    for (int i = 0; i < n; i++) {
+        Box *b = order[i];
+        const Style *is = b->style;
+        FItem *f = &it[i];
+        f->b = b;
+        if (b->kind == BK_REPLACED) { size_replaced(lc, b, W); } else resolve_box_model(b, W);
+        resolve_box_model(b, W);
+        float hpad = b->p[1] + b->p[3] + b->bw[1] + b->bw[3], vpad = b->p[0] + b->p[2] + b->bw[0] + b->bw[2];
+        f->auto_ma = is->margin[row ? 3 : 0].is_auto; f->auto_mb = is->margin[row ? 1 : 2].is_auto;
+        f->auto_ca = is->margin[row ? 0 : 3].is_auto; f->auto_cb = is->margin[row ? 2 : 1].is_auto;
+        f->ma = f->auto_ma ? 0 : b->m[row ? 3 : 0]; f->mb = f->auto_mb ? 0 : b->m[row ? 1 : 2];
+        f->ca = f->auto_ca ? 0 : b->m[row ? 0 : 3]; f->cb = f->auto_cb ? 0 : b->m[row ? 2 : 1];
+        f->grow = is->flex_grow;
+        f->shrink = is->flex_shrink;
+        float mn, mx;
+        measure_box(lc, b, &mn, &mx);
+        if (row) {
+            float pad = is->box_sizing_border ? 0 : hpad;
+            if (!is->flex_basis.is_auto) f->base = len_resolve(&is->flex_basis, W, 0) + pad;
+            else if (!is->width.is_auto) f->base = len_resolve(&is->width, W, 0) + pad;
+            else f->base = mx;
+            f->minv = !is->min_width.is_auto ? len_resolve(&is->min_width, W, 0) + pad : (is->overflow != OV_VISIBLE ? 0 : fminf_(mn, f->base > 0 ? fmaxf_(f->base, 0) + 0 : mn));
+            if (is->width.is_auto && is->flex_basis.is_auto) f->minv = !is->min_width.is_auto ? f->minv : mn;
+            f->maxv = !is->max_width.is_auto ? len_resolve(&is->max_width, W, LAYOUT_INF) + pad : LAYOUT_INF;
+            if (f->base < hpad) f->base = hpad;
+            if (f->minv < hpad) f->minv = hpad;
+        } else {
+            /* column: need the content height at the final cross width */
+            float cw = W - f->ca - f->cb;
+            bool stretch = (is->align_self == AI_AUTO ? st->align_items : is->align_self) == AI_STRETCH;
+            if (!stretch || !is->width.is_auto) {
+                float bw_ = !is->width.is_auto ? len_resolve(&is->width, W, 0) + (is->box_sizing_border ? 0 : hpad) : fminf_(mx, cw);
+                cw = bw_;
+            }
+            if (b->kind == BK_REPLACED) { size_replaced(lc, b, W); }
+            else layout_block(lc, b, W, cw);
+            float pad = is->box_sizing_border ? 0 : vpad;
+            f->cross_inner = b->w;
+            f->base = !is->flex_basis.is_auto ? len_resolve(&is->flex_basis, 0, 0) + pad : (!is->height.is_auto && is->height.pct == 0 ? is->height.px + pad : b->h);
+            f->minv = !is->min_height.is_auto && is->min_height.pct == 0 ? is->min_height.px + pad : (is->height.is_auto ? b->h * 0 + (is->flex_basis.is_auto ? b->h : 0) : 0);
+            f->maxv = !is->max_height.is_auto && is->max_height.pct == 0 ? is->max_height.px + pad : LAYOUT_INF;
+            if (f->base < vpad) f->base = vpad;
+            if (f->minv < vpad) f->minv = vpad;
+        }
+        if (f->minv > f->maxv) f->minv = f->maxv;
+    }
+
+    /* split into lines */
+    int  nlines = 1;
+    bool wrap = st->flex_wrap && row;
+    it[0].line = 0;
+    if (wrap) {
+        float acc = 0;
+        for (int i = 0; i < n; i++) {
+            float outer = clampf(it[i].base, it[i].minv, it[i].maxv) + it[i].ma + it[i].mb;
+            float need = outer + (acc > 0 ? main_gap : 0);
+            if (acc > 0 && acc + need > W + 0.01f) { nlines++; acc = 0; need = outer; }
+            it[i].line = nlines - 1;
+            acc += need;
+        }
+    }
+    float *line_cross = arena_alloc(lc->a, sizeof(float) * (size_t)nlines);
+    int    start = 0;
+    float  total_cross = 0;
+    for (int ln = 0; ln < nlines; ln++) {
+        int end = start;
+        while (end < n && it[end].line == ln) end++;
+        int cnt = end - start;
+        FItem *L = &it[start];
+        /* main sizes */
+        float target = main_avail;
+        if (target < 0) { /* indefinite column: no growing/shrinking, use hypothetical sizes */
+            for (int i = 0; i < cnt; i++) L[i].size = clampf(L[i].base, L[i].minv, L[i].maxv);
+        } else {
+            flex_resolve(L, cnt, target, main_gap);
+        }
+        /* lay items out at their final main size and measure the cross size */
+        float lcross = 0;
+        for (int i = 0; i < cnt; i++) {
+            Box *b = L[i].b;
+            const Style *is = b->style;
+            if (row) {
+                if (b->kind == BK_REPLACED) { size_replaced(lc, b, W); if (is->width.is_auto) b->w = L[i].size; }
+                else layout_block(lc, b, W, L[i].size);
+                L[i].cross_inner = b->h;
+                L[i].cross = b->h + L[i].ca + L[i].cb;
+            } else {
+                L[i].cross = L[i].cross_inner + L[i].ca + L[i].cb;
+            }
+            lcross = fmaxf_(lcross, L[i].cross);
+        }
+        if (nlines == 1) {
+            if (row) {
+                if (def_h >= 0) lcross = def_h;
+                else lcross = clampf(lcross, min_h > 0 ? min_h : 0, max_h >= 0 ? max_h : LAYOUT_INF);
+            } else lcross = W; /* column: the cross axis is the container width */
+        }
+        line_cross[ln] = lcross;
+        total_cross += lcross;
+        /* main axis distribution */
+        float used = main_gap * (float)(cnt > 0 ? cnt - 1 : 0);
+        int   autos = 0;
+        for (int i = 0; i < cnt; i++) {
+            used += L[i].size + L[i].ma + L[i].mb;
+            autos += (L[i].auto_ma ? 1 : 0) + (L[i].auto_mb ? 1 : 0);
+        }
+        float avail_main = main_avail >= 0 ? main_avail : used;
+        float freeS = fmaxf_(0, avail_main - used);
+        float lead = 0, between = main_gap;
+        float auto_share = 0;
+        if (autos) auto_share = freeS / (float)autos;
+        else switch (st->justify) {
+            case JC_END: lead = freeS; break;
+            case JC_CENTER: lead = freeS / 2; break;
+            case JC_BETWEEN: if (cnt > 1) between += freeS / (float)(cnt - 1); break;
+            case JC_AROUND: lead = freeS / (float)cnt / 2; between += freeS / (float)cnt; break;
+            case JC_EVENLY: lead = freeS / (float)(cnt + 1); between += freeS / (float)(cnt + 1); break;
+            default: break;
+        }
+        float pos = lead;
+        float ly = total_cross - lcross + cross_gap * (float)ln; /* cross offset of this line */
+        for (int i = 0; i < cnt; i++) {
+            Box *b = L[i].b;
+            const Style *is = b->style;
+            if (L[i].auto_ma) L[i].ma = auto_share;
+            if (L[i].auto_mb) L[i].mb = auto_share;
+            float main_pos = pos + L[i].ma;
+            /* cross alignment */
+            uint8_t al = is->align_self == AI_AUTO ? st->align_items : is->align_self;
+            float   cross_avail = lcross - L[i].ca - L[i].cb;
+            float   coff = L[i].ca;
+            if (L[i].auto_ca || L[i].auto_cb) {
+                float fs = fmaxf_(0, lcross - L[i].cross_inner - L[i].ca - L[i].cb);
+                int   na = (L[i].auto_ca ? 1 : 0) + (L[i].auto_cb ? 1 : 0);
+                if (L[i].auto_ca) coff += fs / (float)na;
+            } else if (al == AI_END) coff += cross_avail - L[i].cross_inner;
+            else if (al == AI_CENTER) coff += (cross_avail - L[i].cross_inner) / 2;
+            else if (al == AI_STRETCH || al == AI_AUTO) {
+                bool auto_cross = row ? (is->height.is_auto || is->height.pct != 0) : is->width.is_auto;
+                if (auto_cross && b->kind != BK_REPLACED) {
+                    if (row) { b->h = fmaxf_(b->h, cross_avail); L[i].cross_inner = b->h; }
+                    else if (cross_avail > b->w) { /* column: re-lay out wider so content reflows */
+                        layout_block(lc, b, W, cross_avail);
+                        L[i].cross_inner = b->w;
+                    }
+                }
+            }
+            if (row) {
+                b->x = c->cx + main_pos;
+                b->y = c->cy + ly + coff;
+                if (L[i].size > b->w && b->kind == BK_REPLACED) b->w = L[i].size;
+            } else {
+                b->x = c->cx + ly + coff;
+                b->y = c->cy + main_pos;
+                b->h = L[i].size; /* the main size is the height */
+            }
+            b->mt_eff = b->m[0];
+            b->mb_eff = b->m[2];
+            pos = main_pos + L[i].size + L[i].mb + between;
+        }
+        start = end;
+    }
+    if (row) return total_cross + cross_gap * (float)(nlines - 1);
+    /* column: height = main extent */
+    float extent = 0;
+    for (int i = 0; i < n; i++) extent = fmaxf_(extent, it[i].b->y - c->cy + it[i].b->h + it[i].mb);
+    if (def_h >= 0) extent = fmaxf_(extent, def_h);
+    return extent;
+}
+
 /* =============================================================== block layout == */
 static float resolve_content_min(const Style *st, const Length *l, float cb_w, float hpad, float dflt) {
     if (l->is_auto) return dflt;
@@ -1096,7 +1343,17 @@ static void layout_block(LC *lc, Box *b, float cb_w, float forced_bw) {
     b->w = content_w + hpad;
 
     float mt = b->m[0], mb = b->m[2];
-    if (b->inline_ctx) {
+    if (is_flex_container(st) && !b->inline_ctx) {
+        float def_h = -1, min_h = 0, max_h = -1;
+        if (!st->height.is_auto && st->height.pct == 0) def_h = st->height.px - (st->box_sizing_border ? vpad : 0);
+        if (!st->min_height.is_auto && st->min_height.pct == 0) min_h = st->min_height.px - (st->box_sizing_border ? vpad : 0);
+        if (!st->max_height.is_auto && st->max_height.pct == 0) max_h = st->max_height.px - (st->box_sizing_border ? vpad : 0);
+        bool column = st->flex_dir == FD_COL || st->flex_dir == FD_COL_REV;
+        content_h = layout_flex(lc, b, content_w, def_h, min_h, max_h);
+        /* auto height + min-height: the free space only exists once the content size is known, so redo
+         * the main-axis distribution with the min-height as the definite size */
+        if (column && def_h < 0 && min_h > content_h) content_h = layout_flex(lc, b, content_w, min_h, min_h, max_h);
+    } else if (b->inline_ctx) {
         content_h = layout_inline(lc, b, content_w, true, NULL);
     } else {
         bool  collapse_top = !b->bfc && b->p[0] == 0 && b->bw[0] == 0;
@@ -1186,6 +1443,27 @@ static void measure_box(LC *lc, Box *b, float *minw, float *maxw) {
             layout_table_content(lc, b, 0, false, true, &natural, &tmin);
             mx = natural + hpad;
             mn = tmin + hpad;
+        } else if (is_flex_container(st) && !b->inline_ctx) {
+            bool row = st->flex_dir == FD_ROW || st->flex_dir == FD_ROW_REV;
+            float gap = row ? st->col_gap : st->row_gap;
+            int   cnt = 0;
+            for (Box *c = b->first; c; c = c->next) {
+                float cmn, cmx;
+                resolve_box_model(c, 0);
+                measure_box(lc, c, &cmn, &cmx);
+                float cm = (c->style->margin[3].is_auto ? 0 : c->m[3]) + (c->style->margin[1].is_auto ? 0 : c->m[1]);
+                if (row) {
+                    mx += cmx + cm;
+                    mn = st->flex_wrap ? fmaxf_(mn, cmn + cm) : mn + cmn + cm;
+                } else {
+                    mx = fmaxf_(mx, cmx + cm);
+                    mn = fmaxf_(mn, cmn + cm);
+                }
+                cnt++;
+            }
+            if (row && cnt > 1) { mx += gap * (float)(cnt - 1); if (!st->flex_wrap) mn += gap * (float)(cnt - 1); }
+            mn += hpad;
+            mx += hpad;
         } else if (b->inline_ctx) {
             float ext = 0;
             layout_inline(lc, b, LAYOUT_INF, false, &ext);
@@ -1321,6 +1599,23 @@ static const Style *make_anon_style(LC *lc, const Style *parent) {
 static void build_children(LC *lc, Box *parent, const Node *node, int depth) {
     NodeList L = {0};
     flatten_children(lc, &L, node, 0);
+    if (node->style && is_flex_container(node->style) && parent->kind != BK_ANON) {
+        /* every in-flow child of a flex container is a flex item (text runs become anonymous items) */
+        for (int i = 0; i < L.n; i++) {
+            const Node *c = L.v[i];
+            if (c->type == NODE_TEXT) {
+                if (text_is_blank(c)) continue;
+                Box *anon = new_box(lc, node, make_anon_style(lc, node->style), BK_ANON);
+                anon->inline_ctx = true;
+                anon->inl = L.v + i;
+                anon->ninl = 1;
+                box_append(parent, anon);
+            } else {
+                box_append(parent, build_block_box(lc, c, depth));
+            }
+        }
+        return;
+    }
     bool has_block = false;
     for (int i = 0; i < L.n && !has_block; i++)
         if (is_block_level(L.v[i], 0)) has_block = true;

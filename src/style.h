@@ -21,6 +21,9 @@ typedef enum { VA_BASELINE, VA_TOP, VA_MIDDLE, VA_BOTTOM, VA_SUB, VA_SUPER } VAl
 typedef enum { FL_NONE, FL_LEFT, FL_RIGHT } Float;
 typedef enum { POS_STATIC, POS_RELATIVE, POS_ABSOLUTE, POS_FIXED, POS_STICKY } Position;
 typedef enum { OV_VISIBLE, OV_HIDDEN, OV_SCROLL, OV_AUTO } Overflow;
+typedef enum { FD_ROW, FD_ROW_REV, FD_COL, FD_COL_REV } FlexDir;
+typedef enum { JC_START, JC_END, JC_CENTER, JC_BETWEEN, JC_AROUND, JC_EVENLY } Justify;
+typedef enum { AI_STRETCH, AI_START, AI_END, AI_CENTER, AI_BASELINE, AI_AUTO } AlignItems;
 
 /* A length is px + pct * base; auto is a flag. This makes calc(100% - 20px) representable. */
 typedef struct {
@@ -43,6 +46,11 @@ struct Style {
     bool    lh_is_mul;
     float   letter_spacing, text_indent, opacity, border_spacing;
     bool    border_collapse;
+    uint8_t flex_dir, flex_wrap, justify, align_items, align_self;
+    float   flex_grow, flex_shrink, row_gap, col_gap;
+    Length  flex_basis;
+    Length  offset[4]; /* top right bottom left (position offsets), auto by default */
+    int     z_index;
     uint32_t color, bg;
     Length   width, height, min_width, max_width, min_height, max_height;
     Length   margin[4], padding[4]; /* top right bottom left */

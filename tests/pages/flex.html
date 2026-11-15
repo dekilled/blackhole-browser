@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Flexbox</title>
+<style>
+ *{box-sizing:border-box}
+ body{font-family:sans-serif;margin:0;background:#f4f5f7;color:#222}
+ nav{display:flex;align-items:center;gap:16px;background:#14141a;color:#fff;padding:0 24px;height:56px}
+ nav .brand{font-weight:bold;font-size:20px}
+ nav a{color:#c9c9d6;text-decoration:none}
+ nav .spacer{flex:1}
+ nav .cta{background:#7c5cff;color:#fff;padding:8px 14px}
+ .hero{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:180px;background:#e7e3ff;text-align:center;padding:20px}
+ .hero h1{margin:0 0 8px;font-size:30px}
+ .row{display:flex;gap:12px;padding:16px 24px}
+ .card{flex:1;background:#fff;border:1px solid #ddd;padding:14px}
+ .card h3{margin:0 0 6px}
+ .wrap{display:flex;flex-wrap:wrap;gap:10px;padding:0 24px 16px}
+ .chip{flex:0 0 150px;background:#fff;border:1px solid #bbb;padding:10px;text-align:center}
+ .between{display:flex;justify-content:space-between;padding:12px 24px;background:#fff;margin:0 24px}
+ .box{width:80px;height:36px;background:#7c5cff;color:#fff;display:flex;align-items:center;justify-content:center}
+ .col{display:flex;flex-direction:column;gap:6px;padding:16px 24px}
+ .col div{background:#fff;border:1px solid #ccc;padding:8px}
+</style></head><body>
+<nav><span class="brand">BlackHole</span><a href="#">Início</a><a href="#">Docs</a><a href="#">Sobre</a><span class="spacer"></span><a class="cta" href="#">Baixar</a></nav>
+<div class="hero"><h1>Um navegador do zero</h1><p>Flexbox centralizando conteúdo na vertical e na horizontal.</p></div>
+<div class="row">
+  <div class="card"><h3>Rápido</h3>Cresce igualmente com flex:1.</div>
+  <div class="card"><h3>Seguro</h3>TLS sempre verificado, decodificadores fuzzados e limites rígidos de memória.</div>
+  <div class="card"><h3>Leve</h3>Sem dependências pesadas.</div>
+</div>
+<div class="wrap"><div class="chip">um</div><div class="chip">dois</div><div class="chip">três</div><div class="chip">quatro</div><div class="chip">cinco</div><div class="chip">seis</div><div class="chip">sete</div></div>
+<div class="between"><div class="box">A</div><div class="box">B</div><div class="box">C</div></div>
+<div class="col"><div>Item de coluna 1</div><div>Item de coluna 2</div></div>
+</body></html>

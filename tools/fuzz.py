@@ -16,6 +16,10 @@ os.makedirs(OUT, exist_ok=True)
 seeds = [open(p, "rb").read() for p in glob.glob("tests/pages/*.html")]
 
 FRAGMENTS = [
+    b"<div style='display:flex;flex-wrap:wrap;gap:-5px'>", b"<div style='display:flex;flex-direction:column;height:1e30px'>",
+    b"<div style='flex:1e30 1e30 -50px;min-width:1e30px;max-width:-1px'>", b"<div style='display:inline-flex;flex:0 0 1e9px'>",
+    b"<div style='display:flex;justify-content:space-around;align-items:baseline;margin:auto'>",
+    b"<div style='flex-grow:0.0000001;flex-shrink:99999999999;width:calc(1px/0)'>", b"<div style='display:flex;min-height:100vh;flex-direction:column-reverse'>",
     b"<div>", b"</div>", b"<table>", b"<tr><td>", b"</table>", b"<p>", b"<b>", b"</b>", b"<a href=x>", b"</a>",
     b"<style>", b"</style>", b"<script>", b"</script>", b"<textarea>", b"<!--", b"-->", b"<![CDATA[", b"<svg>",
     b"<input type=text size=99999999>", b"<img width=99999999 height=99999999>", b"&#x110000;", b"&#0;", b"&amp",
@@ -29,6 +33,11 @@ FRAGMENTS = [
 ]
 
 ADVERSARIAL = {
+    "flex_deep.html": b"<div style='display:flex'>" * 3000 + b"x",
+    "flex_many.html": b"<div style='display:flex;flex-wrap:wrap'>" + b"<div style='flex:1 1 10px'>a</div>" * 30000 + b"</div>",
+    "flex_col_many.html": b"<div style='display:flex;flex-direction:column;height:100px'>" + b"<p style='flex:1 0 0'>a</p>" * 5000 + b"</div>",
+    "flex_zero.html": b"<div style='display:flex;width:0;gap:1e30px'><div style='flex:1 1 0;min-width:0'>aaaa</div><div style='flex:1'>b</div></div>",
+    "flex_inline_nest.html": b"<div style='display:inline-flex'>" * 400 + b"x",
     "deep_div.html": b"<html><body>" + b"<div>" * 20000 + b"x" + b"</div>" * 20000,
     "deep_inline.html": b"<html><body>" + b"<span>" * 20000 + b"x",
     "deep_table.html": b"<table><tr><td>" * 3000 + b"x",
