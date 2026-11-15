@@ -1,0 +1,45 @@
+/* Software 2D graphics: canvas, rectangles, text (FreeType), PNG output. Pixels are 0xAARRGGBB. */
+#ifndef BH_GFX_H
+#define BH_GFX_H
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+typedef struct {
+    int       w, h;
+    uint32_t *px;
+    int       cx0, cy0, cx1, cy1; /* clip rectangle, [x0,x1) x [y0,y1) */
+} Canvas;
+
+Canvas *canvas_new(int w, int h);
+void    canvas_free(Canvas *c);
+void    canvas_resize(Canvas *c, int w, int h);
+void    canvas_clear(Canvas *c, uint32_t argb);
+/* Sets the clip to the intersection of the canvas and the rectangle. Returns the previous clip in `old` (4 ints). */
+void    canvas_set_clip(Canvas *c, int x, int y, int w, int h, int old[4]);
+void    canvas_restore_clip(Canvas *c, const int old[4]);
+void    canvas_fill_rect(Canvas *c, float x, float y, float w, float h, uint32_t argb);
+void    canvas_fill_ellipse(Canvas *c, float cx, float cy, float rx, float ry, uint32_t argb);
+void    canvas_hline(Canvas *c, int x, int y, int w, uint32_t argb);
+void    canvas_blit_argb(Canvas *c, int x, int y, int w, int h, const uint32_t *src, int src_stride);
+/* Scaled blit with nearest/bilinear sampling of an ARGB image into a destination rectangle. */
+void    canvas_draw_image(Canvas *c, float dx, float dy, float dw, float dh, const uint32_t *src, int sw, int sh);
+bool    canvas_write_png(const Canvas *c, const char *path);
+
+/* ---- fonts ---- */
+typedef struct Font Font;
+enum { FONT_SANS = 0, FONT_SERIF = 1, FONT_MONO = 2 };
+
+/* Returns a cached font object (never NULL once fonts are available). */
+Font  *font_get(int family, bool bold, bool italic, float size);
+bool   font_available(void);
+float  font_ascent(Font *f);
+float  font_descent(Font *f);
+float  font_line_gap_height(Font *f); /* natural line height */
+float  font_text_width(Font *f, const char *s, size_t len, float letter_spacing);
+float  font_char_width(Font *f, uint32_t cp);
+void   canvas_draw_text(Canvas *c, Font *f, float x, float baseline, const char *s, size_t len, uint32_t argb,
+                        float letter_spacing);
+
+#endif

@@ -1,0 +1,139 @@
+#include <locale.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "charset.h"
+#include "dom.h"
+#include "gfx.h"
+#include "html.h"
+#include "layout.h"
+#include "net.h"
+#include "page.h"
+#include "util.h"
+
+static void dump_dom(const Node *root) {
+    const Node *n = root;
+    int         depth = 0;
+    for (;;) {
+        for (int i = 0; i < depth; i++) fputs("  ", stdout);
+        if (n->type == NODE_ELEMENT) {
+            printf("<%s", n->tag);
+            for (const Attr *a = n->attrs; a; a = a->next) printf(" %s=\"%s\"", a->name, a->value);
+            printf(">\n");
+        } else if (n->type == NODE_TEXT) printf("\"%s\"\n", n->text);
+        else if (n->type == NODE_COMMENT) printf("<!--%s-->\n", n->text);
+        else printf("#document\n");
+        if (n->first_child) { n = n->first_child; depth++; continue; }
+        while (n != root && !n->next) { n = n->parent; depth--; }
+        if (n == root) break;
+        n = n->next;
+    }
+}
+
+static void usage(const char *prog) {
+    fprintf(stderr,
+            "BlackHole Browser 0.1\n"
+            "uso: %s [opcoes] [URL]\n"
+            "  --screenshot ARQ.png   renderiza a pagina sem abrir janela e salva um PNG\n"
+            "  --size LxA             tamanho da viewport (padrao 1024x768)\n"
+            "  --scroll N             rolagem vertical (px) para o screenshot\n"
+            "  --full                 screenshot da pagina inteira (limitado a 16000px)\n"
+            "  --dom                  imprime a arvore DOM e sai\n"
+            "  --fetch                imprime o corpo da resposta HTTP e sai\n"
+            "  -v                     log detalhado\n",
+            prog);
+}
+
+int main(int argc, char **argv) {
+    signal(SIGPIPE, SIG_IGN);
+    if (!setlocale(LC_CTYPE, "C.UTF-8")) setlocale(LC_CTYPE, "en_US.UTF-8");
+
+    const char *shot = NULL, *url = NULL;
+    int         W = 1024, H = 768;
+    float       scroll = 0;
+    bool        mode_dom = false, mode_fetch = false, full = false;
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--screenshot") && i + 1 < argc) shot = argv[++i];
+        else if (!strcmp(argv[i], "--size") && i + 1 < argc) {
+            if (sscanf(argv[++i], "%dx%d", &W, &H) != 2 || W < 100 || H < 100 || W > 8000 || H > 8000) {
+                fprintf(stderr, "tamanho invalido\n");
+                return 2;
+            }
+        } else if (!strcmp(argv[i], "--scroll") && i + 1 < argc) scroll = (float)atof(argv[++i]);
+        else if (!strcmp(argv[i], "--dom")) mode_dom = true;
+        else if (!strcmp(argv[i], "--fetch")) mode_fetch = true;
+        else if (!strcmp(argv[i], "--full")) full = true;
+        else if (!strcmp(argv[i], "-v")) bh_verbose = 1;
+        else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { usage(argv[0]); return 0; }
+        else if (argv[i][0] != '-') url = argv[i];
+        else { usage(argv[0]); return 2; }
+    }
+    if (!url) url = "about:blank";
+
+    /* bare paths become file: URLs */
+    char *owned = NULL;
+    if (!strstr(url, "://") && strncmp(url, "data:", 5) && strncmp(url, "about:", 6)) {
+        char *abs = realpath(url, NULL);
+        if (abs) {
+            owned = xmalloc(strlen(abs) + 8);
+            sprintf(owned, "file://%s", abs);
+            free(abs);
+            url = owned;
+        }
+    }
+
+    if (mode_fetch || mode_dom) {
+        FetchOpts o = net_default_opts();
+        o.allow_file = true;
+        Response r;
+        if (!net_fetch(url, &o, &r)) {
+            fprintf(stderr, "falha: %s\n", r.error);
+            return 1;
+        }
+        if (mode_fetch) {
+            fprintf(stderr, "status=%d url=%s tipo=%s charset=%s bytes=%zu seguro=%d\n", r.status, r.url,
+                    r.content_type ? r.content_type : "-", r.charset ? r.charset : "-", r.body_len, r.secure);
+            fwrite(r.body, 1, r.body_len, stdout);
+        } else {
+            size_t n;
+            char  *u8 = charset_to_utf8(r.body, r.body_len, r.charset, &n);
+            Arena  a = {0};
+            dump_dom(html_parse(&a, u8, n));
+            arena_free(&a);
+            free(u8);
+        }
+        response_free(&r);
+        return 0;
+    }
+
+    if (!font_available()) {
+        fprintf(stderr, "nenhuma fonte encontrada (instale fonts-liberation ou fonts-dejavu)\n");
+        return 1;
+    }
+    Page *p = page_load(url, true);
+    page_layout(p, (float)W, (float)H);
+    bh_log("titulo: %s", p->title ? p->title : "(sem titulo)");
+    if (shot) {
+        int CH = H;
+        if (full) {
+            CH = (int)layout_doc_height(p->layout) + 1;
+            if (CH > 16000) CH = 16000;
+            if (CH < H) CH = H;
+        }
+        Canvas *c = canvas_new(W, CH);
+        layout_paint(p->layout, c, 0, 0, W, CH, scroll);
+        if (!canvas_write_png(c, shot)) {
+            fprintf(stderr, "nao consegui escrever %s\n", shot);
+            return 1;
+        }
+        fprintf(stderr, "ok: %s (%dx%d) titulo=\"%s\" altura_doc=%.0f\n", shot, W, CH, p->title ? p->title : "", layout_doc_height(p->layout));
+        canvas_free(c);
+    } else {
+        fprintf(stderr, "(modo janela ainda nao implementado: use --screenshot)\n");
+    }
+    page_free(p);
+    free(owned);
+    return 0;
+}

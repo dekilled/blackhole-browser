@@ -1,0 +1,7 @@
+build/
+*.o
+*.png
+!docs/*.png
+*.log
+core
+.vscode/
