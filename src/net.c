@@ -10,6 +10,7 @@
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
 #include <poll.h>
+#include <pthread.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -61,12 +62,12 @@ static long long now_ms(void) {
 }
 
 /* ------------------------------------------------------------------ TLS ---- */
-static SSL_CTX *g_ctx;
+static SSL_CTX      *g_ctx;
+static pthread_once_t g_ctx_once = PTHREAD_ONCE_INIT;
 
-static SSL_CTX *tls_ctx(void) {
-    if (g_ctx) return g_ctx;
+static void tls_ctx_init(void) {
     SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
-    if (!ctx) return NULL;
+    if (!ctx) return;
     SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION); /* no SSLv3 / TLS 1.0 / 1.1 */
     SSL_CTX_set_options(ctx, SSL_OP_NO_COMPRESSION);     /* CRIME */
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);      /* certificate verification is NOT optional */
@@ -74,7 +75,11 @@ static SSL_CTX *tls_ctx(void) {
     static const unsigned char alpn[] = {8, 'h', 't', 't', 'p', '/', '1', '.', '1'};
     SSL_CTX_set_alpn_protos(ctx, alpn, sizeof alpn);
     g_ctx = ctx;
-    return ctx;
+}
+
+static SSL_CTX *tls_ctx(void) {
+    pthread_once(&g_ctx_once, tls_ctx_init);
+    return g_ctx;
 }
 
 typedef struct {

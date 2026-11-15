@@ -28,7 +28,7 @@ typedef struct {
     } while (0)
 
 /* ================================================================ helpers === */
-Font *layout_style_font(const Style *s) {
+BhFont *layout_style_font(const Style *s) {
     static const int fam[] = {FONT_SANS, FONT_SERIF, FONT_MONO};
     return font_get(fam[s->font_family % 3], s->font_weight >= 600, s->italic, s->font_size);
 }
@@ -36,7 +36,7 @@ Font *layout_style_font(const Style *s) {
 static float fmaxf_(float a, float b) { return a > b ? a : b; }
 static float fminf_(float a, float b) { return a < b ? a : b; }
 
-static void line_metrics(const Style *st, Font *f, float *asc, float *desc) {
+static void line_metrics(const Style *st, BhFont *f, float *asc, float *desc) {
     float a = font_ascent(f), d = font_descent(f);
     float lh = st->line_height < 0 ? font_line_gap_height(f) : (st->lh_is_mul ? st->line_height * st->font_size : st->line_height);
     float leading = lh - (a + d);
@@ -132,7 +132,7 @@ static const char *first_option_text(Arena *a, const Node *sel) {
 
 static void size_replaced(LC *lc, Box *b, float avail_w) {
     const Style *st = b->style;
-    Font        *f = layout_style_font(st);
+    BhFont        *f = layout_style_font(st);
     float        nw = 0, nh = 0; /* natural content size */
     bool         have_ratio = false;
     resolve_box_model(b, avail_w);
@@ -283,7 +283,7 @@ static const char *transform_text(LC *lc, const char *s, size_t n, int tt, size_
     return res;
 }
 
-static void emit_word(LC *lc, ItemList *L, const Style *st, Font *font, const Node *link, const char *s, size_t n, bool brk) {
+static void emit_word(LC *lc, ItemList *L, const Style *st, BhFont *font, const Node *link, const char *s, size_t n, bool brk) {
     if (!n) return;
     Item it;
     memset(&it, 0, sizeof it);
@@ -299,7 +299,7 @@ static void emit_word(LC *lc, ItemList *L, const Style *st, Font *font, const No
     il_push(lc, L, it);
 }
 
-static void emit_space(LC *lc, ItemList *L, const Style *st, Font *font, const Node *link, int count, bool preserved) {
+static void emit_space(LC *lc, ItemList *L, const Style *st, BhFont *font, const Node *link, int count, bool preserved) {
     Item it;
     memset(&it, 0, sizeof it);
     it.kind = IT_SPACE;
@@ -313,7 +313,7 @@ static void emit_space(LC *lc, ItemList *L, const Style *st, Font *font, const N
 }
 
 static void collect_text(LC *lc, ItemList *L, const Node *tn, const Style *st, const Node *link) {
-    Font       *font = layout_style_font(st);
+    BhFont       *font = layout_style_font(st);
     const char *s = tn->text, *end = s + strlen(s);
     int         ws = st->white_space;
     bool        collapse = ws == WS_NORMAL || ws == WS_NOWRAP || ws == WS_PRE_LINE;
@@ -484,7 +484,7 @@ typedef struct {
     bool      has_content, pending_space;
     float     space_w;
     const Style *space_style;
-    Font     *space_font;
+    BhFont     *space_font;
     const Node *space_link;
     bool      first_line;
     float     indent;
@@ -496,7 +496,7 @@ typedef struct {
     Buf       run;
     const Style *run_style;
     const Node *run_link;
-    Font     *run_font;
+    BhFont     *run_font;
     float     run_x, run_w;
     float     asc, desc;
     int       nlines;
@@ -520,7 +520,7 @@ static void flush_run(LS *ls) {
     ls->run_active = false;
 }
 
-static void add_text(LS *ls, const char *text, int len, float w, const Style *st, Font *font, const Node *link) {
+static void add_text(LS *ls, const char *text, int len, float w, const Style *st, BhFont *font, const Node *link) {
     if (ls->run_active && (ls->run_style != st || ls->run_link != link || ls->run_font != font)) flush_run(ls);
     if (!ls->run_active) {
         ls->run_active = true;
@@ -556,7 +556,7 @@ static void finalize_line(LS *ls, bool force) {
         return;
     }
     Box *b = ls->b;
-    Font *sf = layout_style_font(b->style);
+    BhFont *sf = layout_style_font(b->style);
     float sa, sd;
     line_metrics(b->style, sf, &sa, &sd);
     float asc = fmaxf_(sa, ls->asc), desc = fmaxf_(sd, ls->desc);
@@ -598,7 +598,7 @@ static void finalize_line(LS *ls, bool force) {
         for (int i = 0; i < ls->nlspans; i++) {
             LineSpan    *sp = &ls->lspans[i];
             const Style *st = sp->style;
-            Font        *f = layout_style_font(st);
+            BhFont        *f = layout_style_font(st);
             float        pt = fmaxf_(0, len_resolve(&st->padding[0], ls->avail, 0)), pb = fmaxf_(0, len_resolve(&st->padding[2], ls->avail, 0));
             float        bt = st->border_style[0] != BS_NONE ? st->border_w[0] : 0, bb = st->border_style[2] != BS_NONE ? st->border_w[2] : 0;
             Span         s;

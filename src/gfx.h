@@ -28,18 +28,18 @@ void    canvas_draw_image(Canvas *c, float dx, float dy, float dw, float dh, con
 bool    canvas_write_png(const Canvas *c, const char *path);
 
 /* ---- fonts ---- */
-typedef struct Font Font;
+typedef struct BhFont BhFont;
 enum { FONT_SANS = 0, FONT_SERIF = 1, FONT_MONO = 2 };
 
 /* Returns a cached font object (never NULL once fonts are available). */
-Font  *font_get(int family, bool bold, bool italic, float size);
+BhFont  *font_get(int family, bool bold, bool italic, float size);
 bool   font_available(void);
-float  font_ascent(Font *f);
-float  font_descent(Font *f);
-float  font_line_gap_height(Font *f); /* natural line height */
-float  font_text_width(Font *f, const char *s, size_t len, float letter_spacing);
-float  font_char_width(Font *f, uint32_t cp);
-void   canvas_draw_text(Canvas *c, Font *f, float x, float baseline, const char *s, size_t len, uint32_t argb,
+float  font_ascent(BhFont *f);
+float  font_descent(BhFont *f);
+float  font_line_gap_height(BhFont *f); /* natural line height */
+float  font_text_width(BhFont *f, const char *s, size_t len, float letter_spacing);
+float  font_char_width(BhFont *f, uint32_t cp);
+void   canvas_draw_text(Canvas *c, BhFont *f, float x, float baseline, const char *s, size_t len, uint32_t argb,
                         float letter_spacing);
 
 #endif

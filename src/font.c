@@ -24,7 +24,7 @@ typedef struct FaceEntry {
     char    path[512];
 } FaceEntry;
 
-struct Font {
+struct BhFont {
     FaceEntry *chain[4]; /* primary + fallbacks */
     int        nchain;
     float      size;
@@ -94,22 +94,22 @@ static FaceEntry *pick_primary(int family, bool bold, bool italic) {
 
 bool font_available(void) { return pick_primary(FONT_SANS, false, false) != NULL; }
 
-Font *font_get(int family, bool bold, bool italic, float size) {
-    static Font **cache;
+BhFont *font_get(int family, bool bold, bool italic, float size) {
+    static BhFont **cache;
     static int    n, cap;
     if (size < 1) size = 1;
     if (size > 400) size = 400;
     float qs = floorf(size * 4 + 0.5f) / 4; /* quarter-pixel size buckets bound the cache */
     for (int i = 0; i < n; i++) {
-        Font *f = cache[i];
+        BhFont *f = cache[i];
         if (f->size == qs && f->family == family && f->bold == bold && f->italic == italic) return f;
     }
     FaceEntry *prim = pick_primary(family, bold, italic);
     if (!prim) return NULL;
-    Font *f = xcalloc(1, sizeof *f);
+    BhFont *f = xcalloc(1, sizeof *f);
     if (n == cap) {
         cap = cap ? cap * 2 : 32;
-        cache = xrealloc(cache, sizeof(Font *) * (size_t)cap);
+        cache = xrealloc(cache, sizeof(BhFont *) * (size_t)cap);
     }
     cache[n++] = f;
     f->size = qs;
@@ -131,11 +131,11 @@ Font *font_get(int family, bool bold, bool italic, float size) {
     return f;
 }
 
-float font_ascent(Font *f) { return f->ascent; }
-float font_descent(Font *f) { return f->descent; }
-float font_line_gap_height(Font *f) { return f->line_height; }
+float font_ascent(BhFont *f) { return f->ascent; }
+float font_descent(BhFont *f) { return f->descent; }
+float font_line_gap_height(BhFont *f) { return f->line_height; }
 
-static Glyph *glyph_lookup(Font *f, uint32_t cp) {
+static Glyph *glyph_lookup(BhFont *f, uint32_t cp) {
     if (!f->glyphs) f->glyphs = xcalloc(GLYPH_SLOTS, sizeof(Glyph));
     Glyph *tbl = f->glyphs;
     uint32_t h = (cp * 2654435761u) % GLYPH_SLOTS;
@@ -175,12 +175,12 @@ static Glyph *glyph_lookup(Font *f, uint32_t cp) {
     return NULL;
 }
 
-float font_char_width(Font *f, uint32_t cp) {
+float font_char_width(BhFont *f, uint32_t cp) {
     Glyph *g = glyph_lookup(f, cp);
     return g ? g->advance : f->size * 0.5f;
 }
 
-float font_text_width(Font *f, const char *s, size_t len, float ls) {
+float font_text_width(BhFont *f, const char *s, size_t len, float ls) {
     float       w = 0;
     const char *end = s + len;
     while (s < end) {
@@ -192,7 +192,7 @@ float font_text_width(Font *f, const char *s, size_t len, float ls) {
     return w;
 }
 
-void canvas_draw_text(Canvas *c, Font *f, float x, float baseline, const char *s, size_t len, uint32_t argb, float ls) {
+void canvas_draw_text(Canvas *c, BhFont *f, float x, float baseline, const char *s, size_t len, uint32_t argb, float ls) {
     uint32_t a0 = argb >> 24;
     if (!a0) return;
     const char *end = s + len;

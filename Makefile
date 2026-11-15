@@ -7,7 +7,7 @@ HARDEN   = -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -fno-strict-overfl
 CFLAGS  ?= -O2 -g
 CFLAGS  += $(CSTD) $(WARN) $(HARDEN) $(shell pkg-config --cflags $(PKGS))
 LDFLAGS += -pie -Wl,-z,relro,-z,now
-LDLIBS   = $(shell pkg-config --libs $(PKGS)) -lm
+LDLIBS   = $(shell pkg-config --libs $(PKGS)) -lm -lpthread
 
 SRC      = $(wildcard src/*.c)
 OBJ      = $(SRC:src/%.c=build/%.o)

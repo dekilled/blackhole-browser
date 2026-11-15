@@ -1,4 +1,5 @@
 #include <locale.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,7 +11,9 @@
 #include "html.h"
 #include "layout.h"
 #include "net.h"
+#include "browser.h"
 #include "page.h"
+#include "ui.h"
 #include "util.h"
 
 static void dump_dom(const Node *root) {
@@ -40,6 +43,9 @@ static void usage(const char *prog) {
             "  --size LxA             tamanho da viewport (padrao 1024x768)\n"
             "  --scroll N             rolagem vertical (px) para o screenshot\n"
             "  --full                 screenshot da pagina inteira (limitado a 16000px)\n"
+            "  --chrome               screenshot inclui a interface (barra de endereco etc.)\n"
+            "  --click X,Y            simula um clique (implica --chrome); pode repetir\n"
+            "  --wheel N              simula rolagem do mouse em N pixels (implica --chrome)\n"
             "  --dom                  imprime a arvore DOM e sai\n"
             "  --fetch                imprime o corpo da resposta HTTP e sai\n"
             "  -v                     log detalhado\n",
@@ -53,7 +59,9 @@ int main(int argc, char **argv) {
     const char *shot = NULL, *url = NULL;
     int         W = 1024, H = 768;
     float       scroll = 0;
-    bool        mode_dom = false, mode_fetch = false, full = false;
+    bool        mode_dom = false, mode_fetch = false, full = false, chrome = false;
+    int         clicks[8][2], nclicks = 0;
+    float       wheel = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--screenshot") && i + 1 < argc) shot = argv[++i];
         else if (!strcmp(argv[i], "--size") && i + 1 < argc) {
@@ -65,6 +73,11 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--dom")) mode_dom = true;
         else if (!strcmp(argv[i], "--fetch")) mode_fetch = true;
         else if (!strcmp(argv[i], "--full")) full = true;
+        else if (!strcmp(argv[i], "--chrome")) chrome = true;
+        else if (!strcmp(argv[i], "--click") && i + 1 < argc) {
+            if (nclicks < 8 && sscanf(argv[++i], "%d,%d", &clicks[nclicks][0], &clicks[nclicks][1]) == 2) nclicks++;
+            chrome = true;
+        } else if (!strcmp(argv[i], "--wheel") && i + 1 < argc) { wheel = (float)atof(argv[++i]); chrome = true; }
         else if (!strcmp(argv[i], "-v")) bh_verbose = 1;
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { usage(argv[0]); return 0; }
         else if (argv[i][0] != '-') url = argv[i];
@@ -112,10 +125,39 @@ int main(int argc, char **argv) {
         fprintf(stderr, "nenhuma fonte encontrada (instale fonts-liberation ou fonts-dejavu)\n");
         return 1;
     }
+    if (!shot) { /* interactive window */
+        Browser *b = browser_new(1100, 760);
+        int rc = ui_x11_run(b, url[0] && strcmp(url, "about:blank") ? url : NULL);
+        browser_free(b);
+        free(owned);
+        return rc;
+    }
+    if (chrome) { /* headless run of the whole browser UI */
+        Browser *b = browser_new(W, H);
+        browser_navigate(b, url, true, true);
+        for (int step = 0; step <= nclicks; step++) {
+            while (b->loading) {
+                struct pollfd pf = {b->notify_fd[0], POLLIN, 0};
+                if (poll(&pf, 1, 30000) <= 0) break;
+                browser_loader_ready(b);
+            }
+            if (step < nclicks) {
+                browser_mouse_move(b, clicks[step][0], clicks[step][1]);
+                browser_mouse_down(b, clicks[step][0], clicks[step][1], 1);
+            }
+        }
+        if (wheel != 0) browser_wheel(b, 0, 0, wheel);
+        browser_render(b);
+        bool ok = canvas_write_png(b->canvas, shot);
+        fprintf(stderr, "%s: %s (%dx%d) url=%s\n", ok ? "ok" : "ERRO", shot, W, H, b->page ? b->page->url : "-");
+        browser_free(b);
+        free(owned);
+        return ok ? 0 : 1;
+    }
     Page *p = page_load(url, true);
     page_layout(p, (float)W, (float)H);
     bh_log("titulo: %s", p->title ? p->title : "(sem titulo)");
-    if (shot) {
+    {
         int CH = H;
         if (full) {
             CH = (int)layout_doc_height(p->layout) + 1;
@@ -130,8 +172,6 @@ int main(int argc, char **argv) {
         }
         fprintf(stderr, "ok: %s (%dx%d) titulo=\"%s\" altura_doc=%.0f\n", shot, W, CH, p->title ? p->title : "", layout_doc_height(p->layout));
         canvas_free(c);
-    } else {
-        fprintf(stderr, "(modo janela ainda nao implementado: use --screenshot)\n");
     }
     page_free(p);
     free(owned);

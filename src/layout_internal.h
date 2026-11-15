@@ -16,7 +16,7 @@ typedef struct {
     bool         preserved;  /* IT_SPACE: not collapsible (pre / pre-wrap) */
     const Style *style;
     const Node  *link;
-    Font        *font;
+    BhFont        *font;
     const char  *text;
     int          len; /* bytes for IT_WORD, count for IT_SPACE */
     float        w;
@@ -28,7 +28,7 @@ typedef struct {
     const char  *text;
     int          len;
     const Style *style;
-    Font        *font;
+    BhFont        *font;
     const Node  *link;
     Box         *box; /* atomic inline (inline-block, image, control) */
 } Frag;
@@ -86,7 +86,7 @@ struct LayoutDoc {
     uint32_t      canvas_bg;
 };
 
-Font *layout_style_font(const Style *s);
+BhFont *layout_style_font(const Style *s);
 
 /* paint.c */
 void paint_document(const LayoutDoc *d, Canvas *c, int x, int y, int w, int h, float scroll_y);

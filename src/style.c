@@ -1,6 +1,7 @@
 #include "style.h"
 
 #include <math.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -39,9 +40,11 @@ static const char UA_CSS[] =
     "summary{display:block}iframe,object,embed,video,audio,canvas,svg{display:inline-block}"
     "br{display:inline}";
 
-static Stylesheet *g_ua;
-Stylesheet        *style_ua_sheet(void) {
-    if (!g_ua) g_ua = css_parse(UA_CSS, sizeof UA_CSS - 1, 0);
+static Stylesheet   *g_ua;
+static pthread_once_t g_ua_once = PTHREAD_ONCE_INIT;
+static void           ua_init(void) { g_ua = css_parse(UA_CSS, sizeof UA_CSS - 1, 0); }
+Stylesheet           *style_ua_sheet(void) {
+    pthread_once(&g_ua_once, ua_init);
     return g_ua;
 }
 
@@ -704,7 +707,7 @@ static void apply_decl(Apply *ap, const Decl *d, int pass) {
     Length l;
     switch (id) {
     case PROP_DISPLAY: {
-        static const struct { const char *n; Display d; } m[] = {
+        static const struct { const char *n; DisplayType d; } m[] = {
             {"none", DISP_NONE}, {"block", DISP_BLOCK}, {"inline", DISP_INLINE}, {"inline-block", DISP_INLINE_BLOCK},
             {"list-item", DISP_LIST_ITEM}, {"table", DISP_TABLE}, {"inline-table", DISP_TABLE},
             {"table-row", DISP_TABLE_ROW}, {"table-cell", DISP_TABLE_CELL}, {"table-row-group", DISP_TABLE_ROW_GROUP},

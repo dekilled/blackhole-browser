@@ -87,7 +87,7 @@ static void paint_borders(PC *pc, const Style *st, const float bw[4], float x, f
 
 static void draw_label(PC *pc, const Box *b, float bx, float by) {
     const Style *st = b->style;
-    Font        *f = layout_style_font(st);
+    BhFont        *f = layout_style_font(st);
     float        cx = bx + b->cx, cy = by + b->cy;
     float        ch = b->h - (b->p[0] + b->p[2] + b->bw[0] + b->bw[2]);
     float        lh = font_line_gap_height(f);
@@ -142,7 +142,7 @@ static void paint_replaced(PC *pc, const Box *b, float bx, float by) {
         if (b->image) {
             canvas_draw_image(c, cx, cy, cw, ch, b->image->px, b->image->w, b->image->h);
         } else if (b->label && *b->label) {
-            Font *f = layout_style_font(b->style);
+            BhFont *f = layout_style_font(b->style);
             int   old[4];
             canvas_set_clip(c, (int)cx, (int)cy, (int)ceilf(cw), (int)ceilf(ch), old);
             canvas_draw_text(c, f, cx + 2, cy + font_ascent(f) + 1, b->label, strlen(b->label), 0xFF666666u, 0);
@@ -154,7 +154,7 @@ static void paint_replaced(PC *pc, const Box *b, float bx, float by) {
         canvas_fill_rect(c, cx, cy, 13, 13, 0xFF767676u);
         canvas_fill_rect(c, cx + 1, cy + 1, 11, 11, 0xFFFFFFFFu);
         if (dom_attr(b->node, "checked")) {
-            Font *f = font_get(FONT_SANS, true, false, 13);
+            BhFont *f = font_get(FONT_SANS, true, false, 13);
             canvas_draw_text(c, f, cx + 1, cy + 11, "\xE2\x9C\x93", 3, 0xFF1A1A1Au, 0);
         }
         break;
@@ -169,7 +169,7 @@ static void paint_replaced(PC *pc, const Box *b, float bx, float by) {
         const char *tag = b->node->tag;
         bool        media = !strcmp(tag, "video") || !strcmp(tag, "audio");
         canvas_fill_rect(c, cx, cy, cw, ch, media ? 0xFF111111u : 0xFFF4F4F4u);
-        Font *f = font_get(FONT_SANS, false, false, 13);
+        BhFont *f = font_get(FONT_SANS, false, false, 13);
         if (b->label && cw > 20) {
             int old[4];
             canvas_set_clip(c, (int)cx, (int)cy, (int)ceilf(cw), (int)ceilf(ch), old);
@@ -228,7 +228,7 @@ static void paint_box(PC *pc, const Box *b, float ox, float oy, int depth) {
         if (st->display == DISP_LIST_ITEM && st->list_style != LS_NONE && b->kind == BK_BLOCK) {
             char mt[48];
             marker_text(b, mt, sizeof mt);
-            Font *f = layout_style_font(st);
+            BhFont *f = layout_style_font(st);
             float base = b->baseline >= 0 ? by + b->baseline : by + b->cy + font_ascent(f);
             float w = font_text_width(f, mt, strlen(mt), 0);
             float gap = st->list_style <= LS_SQUARE ? st->font_size * 0.35f : st->font_size * 0.3f;
@@ -249,7 +249,7 @@ void paint_document(const LayoutDoc *d, Canvas *c, int x, int y, int w, int h, f
     canvas_set_clip(c, x, y, w, h, old);
     canvas_fill_rect(c, (float)x, (float)y, (float)w, (float)h, d->canvas_bg);
     if (d->root) {
-        PC pc = {c, NULL, scroll_y, scroll_y + (float)h};
+        PC pc = {c, NULL, (float)y, (float)(y + h)}; /* visible range, in canvas coordinates like `by` */
         const Node *html = d->root->node;
         if (html->style && (html->style->bg >> 24)) pc.skip_bg = html;
         else {
