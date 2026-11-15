@@ -1,4 +1,5 @@
 #include "css.h"
+#include "diag.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -778,6 +779,7 @@ static Decl *parse_decls_range(Arena *a, const char *s, const char *end) {
                         str_lower(nt);
                         id = prop_lookup(nt);
                     }
+                    if (id == PROP_UNKNOWN && nt[0] != '-') diag_note("css-propriedade-ignorada", nt);
                     if (id != PROP_UNKNOWN) {
                         Decl *d = arena_alloc(a, sizeof *d);
                         d->prop = id;
@@ -870,6 +872,7 @@ static void parse_rules(Stylesheet *sh, const char *s, const char *end, MediaCon
                 if (depth < MAX_NEST) parse_rules(sh, block, inner_end, media, depth + 1);
                 s = block_end;
             } else {
+                if (strcmp(an, "charset") && strcmp(an, "namespace")) { char tmp[40]; snprintf(tmp, sizeof tmp, "@%s", an); diag_note("css-at-rule-ignorada", tmp); }
                 /* @font-face, @keyframes, @page, @charset, @namespace, @layer a, b; ... */
                 s = has_block ? block_end : (pe < end ? pe + 1 : end);
             }
@@ -887,6 +890,13 @@ static void parse_rules(Stylesheet *sh, const char *s, const char *end, MediaCon
         const char *inner_end = block_end > block && block_end[-1] == '}' ? block_end - 1 : block_end;
         int          nsels = 0;
         ComplexSel **sels = parse_selector_list(s, pe, &sh->arena, &nsels);
+        if (!sels && diag_on) {
+            char tmp[100];
+            size_t n = (size_t)(pe - s) < sizeof tmp - 1 ? (size_t)(pe - s) : sizeof tmp - 1;
+            memcpy(tmp, s, n);
+            tmp[n] = 0;
+            diag_note("css-seletor-descartado", str_trim(tmp));
+        }
         if (sels && nsels > 0) {
             Decl *d = parse_decls_range(&sh->arena, block, inner_end);
             if (d) add_rule(sh, sels, nsels, d, media);

@@ -18,6 +18,7 @@
 #include "util.h"
 
 int selftest_run(void);
+int diagnose_run(const char *url, int W, int H);
 
 static void dump_dom(const Node *root) {
     const Node *n = root;
@@ -49,6 +50,7 @@ static void usage(const char *prog) {
             "  --chrome               screenshot inclui a interface (barra de endereco etc.)\n"
             "  --click X,Y            simula um clique (implica --chrome); pode repetir\n"
             "  --wheel N              simula rolagem do mouse em N pixels (implica --chrome)\n"
+            "  --diagnose             explica por que uma pagina renderiza mal (o que foi ignorado)\n"
             "  --dom                  imprime a arvore DOM e sai\n"
             "  --fetch                imprime o corpo da resposta HTTP e sai\n"
             "  -v                     log detalhado\n",
@@ -90,7 +92,7 @@ int main(int argc, char **argv) {
     const char *shot = NULL, *url = NULL;
     int         W = 1024, H = 768;
     float       scroll = 0;
-    bool        mode_dom = false, mode_fetch = false, full = false, chrome = false;
+    bool        mode_diag = false, mode_dom = false, mode_fetch = false, full = false, chrome = false;
     int         clicks[8][2], nclicks = 0;
     float       wheel = 0;
     for (int i = 1; i < argc; i++) {
@@ -102,6 +104,7 @@ int main(int argc, char **argv) {
             }
         } else if (!strcmp(argv[i], "--scroll") && i + 1 < argc) scroll = (float)atof(argv[++i]);
         else if (!strcmp(argv[i], "--dom")) mode_dom = true;
+        else if (!strcmp(argv[i], "--diagnose")) mode_diag = true;
         else if (!strcmp(argv[i], "--fetch")) mode_fetch = true;
         else if (!strcmp(argv[i], "--full")) full = true;
         else if (!strcmp(argv[i], "--chrome")) chrome = true;
@@ -128,6 +131,10 @@ int main(int argc, char **argv) {
         }
     }
 
+    if (mode_diag) {
+        if (!font_available()) { fprintf(stderr, "nenhuma fonte encontrada\n"); return 1; }
+        return diagnose_run(url, W, H);
+    }
     if (mode_fetch || mode_dom) {
         FetchOpts o = net_default_opts();
         o.allow_file = true;

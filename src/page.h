@@ -30,6 +30,7 @@ typedef struct Page {
     int          nimages_fetched;
     bool         allow_file_subresources;
     char        *base; /* base URL for relative references */
+    size_t       html_bytes;
 } Page;
 
 /* Loads and parses a URL. Never returns NULL: on failure returns an error page. */

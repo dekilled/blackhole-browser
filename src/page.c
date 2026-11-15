@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "charset.h"
+#include "diag.h"
 #include "img.h"
 #include "html.h"
 #include "style.h"
@@ -41,6 +42,7 @@ static char *fetch_text(Page *p, const char *url, const char *expect_type, size_
         else bh_log("ignoring %s: unexpected type %s", url, r.content_type);
     } else {
         bh_log("failed to fetch %s: %s", url, r.error ? r.error : "HTTP error");
+        diag_note("rede-falhou", url);
     }
     response_free(&r);
     return out;
@@ -201,6 +203,7 @@ Page *page_load(const char *url, bool user_initiated) {
     Page *p = new_page(r.url ? r.url : url);
     p->status = r.status;
     p->secure = r.secure;
+    p->html_bytes = r.body_len;
     p->allow_file_subresources = user_initiated && !strncmp(p->url, "file:", 5);
 
     const char *ct = r.content_type ? r.content_type : "text/html";
@@ -290,7 +293,7 @@ static void *image_worker(void *arg) {
         Response r;
         if (net_fetch(pi->url, &o, &r) && r.status >= 200 && r.status < 300) {
             if (image_decode(r.body, r.body_len, &pi->img)) pi->failed = false;
-            else bh_log("image decode failed: %s (%s)", pi->url, r.content_type ? r.content_type : "?");
+            else { bh_log("image decode failed: %s (%s)", pi->url, r.content_type ? r.content_type : "?"); diag_note("imagem-formato-nao-suportado", r.content_type ? r.content_type : "?"); }
         } else {
             bh_log("image fetch failed: %s: %s", pi->url, r.error ? r.error : "HTTP error");
         }

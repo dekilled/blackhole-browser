@@ -1,4 +1,5 @@
 #include "style.h"
+#include "diag.h"
 
 #include <math.h>
 #include <pthread.h>
@@ -849,8 +850,15 @@ static void apply_decl(Apply *ap, const Decl *d, int pass) {
             {"grid", DISP_BLOCK}, {"inline-grid", DISP_INLINE_BLOCK}, {"contents", DISP_CONTENTS},
             {"flow-root", DISP_BLOCK}, {"table-column", DISP_NONE}, {"table-column-group", DISP_NONE},
         };
+        bool found = false;
         for (size_t i = 0; i < sizeof m / sizeof *m; i++)
-            if (streq(w0, m[i].n)) { s->display = (uint8_t)m[i].d; break; }
+            if (streq(w0, m[i].n)) { s->display = (uint8_t)m[i].d; found = true; break; }
+        if (diag_on) {
+            char tmp[64];
+            snprintf(tmp, sizeof tmp, "display:%s", w0);
+            if (!found) diag_note("css-valor-ignorado", tmp);
+            else if (streq(w0, "grid") || streq(w0, "inline-grid")) diag_note("css-aproximado", tmp);
+        }
         break;
     }
     case PROP_COLOR: {
@@ -1143,12 +1151,13 @@ static void apply_decl(Apply *ap, const Decl *d, int pass) {
         }
         break;
     case PROP_BOX_SIZING: s->box_sizing_border = streq(w0, "border-box"); break;
-    case PROP_FLOAT: s->float_ = streq(w0, "left") || streq(w0, "inline-start") ? FL_LEFT : streq(w0, "right") || streq(w0, "inline-end") ? FL_RIGHT : FL_NONE; break;
+    case PROP_FLOAT: if (!streq(w0, "none")) diag_note("css-aproximado", "float"); s->float_ = streq(w0, "left") || streq(w0, "inline-start") ? FL_LEFT : streq(w0, "right") || streq(w0, "inline-end") ? FL_RIGHT : FL_NONE; break;
     case PROP_CLEAR: s->clear = streq(w0, "left") ? 1 : streq(w0, "right") ? 2 : streq(w0, "both") ? 3 : 0; break;
     case PROP_OVERFLOW:
         s->overflow = streq(w0, "hidden") || streq(w0, "clip") ? OV_HIDDEN : streq(w0, "scroll") ? OV_SCROLL : streq(w0, "auto") ? OV_AUTO : OV_VISIBLE;
         break;
     case PROP_POSITION:
+        if (streq(w0, "sticky")) diag_note("css-aproximado", "position:sticky");
         s->position = streq(w0, "relative") ? POS_RELATIVE : streq(w0, "absolute") ? POS_ABSOLUTE : streq(w0, "fixed") ? POS_FIXED
                     : streq(w0, "sticky") ? POS_STICKY : POS_STATIC;
         break;
